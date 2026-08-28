@@ -1,0 +1,44 @@
+<Window x:Class="RpDashboard.Host.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="RP Dashboard" Height="700" Width="900" MinHeight="480" MinWidth="640"
+        Background="{StaticResource Ink}" WindowStartupLocation="CenterScreen">
+
+    <DockPanel>
+
+        <!-- One status bar for the whole app. The connection line is the shared one: it reports
+             what the single reader is doing, so no tab needs to say it separately any more. -->
+        <Border DockPanel.Dock="Bottom" Background="{StaticResource Panel}"
+                BorderBrush="{StaticResource Rule}" BorderThickness="0,1,0,0" Padding="12,6">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Ellipse x:Name="ConnectionDot" Width="7" Height="7" Margin="0,0,7,0"
+                             Fill="{StaticResource Muted}" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="ConnectionText" Text="not listening"
+                               Style="{StaticResource Label}" VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <TextBlock x:Name="ToolStatusText" Grid.Column="1" Style="{StaticResource Label}"
+                           Margin="16,0" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <CheckBox x:Name="MuteBox" Content="Mute all" VerticalAlignment="Center"
+                              Margin="0,0,12,0" Checked="OnMuteChanged" Unchecked="OnMuteChanged"/>
+                    <TextBlock x:Name="PluginCountText" Style="{StaticResource Label}"
+                               VerticalAlignment="Center" Cursor="Hand"
+                               MouseLeftButtonUp="OnPluginCountClicked"
+                               ToolTip="Which tools loaded, and anything that didn't."/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <TabControl x:Name="Tabs" SelectionChanged="OnTabChanged" Padding="0"/>
+
+    </DockPanel>
+</Window>

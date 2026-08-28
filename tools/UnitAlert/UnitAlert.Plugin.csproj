@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- A library, not a WinExe. This is the whole conversion in one line: the tool stopped
+         being a process and became a tab. -->
+    <OutputType>Library</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>UnitAlert</AssemblyName>
+    <RootNamespace>UnitAlert</RootNamespace>
+    <Version>2.0.0</Version>
+    <Product>Unit Alert</Product>
+    <Description>Plays a sound when a callsign appears in the GTA World chat.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Private, and deliberately not copied to the output. The host already has this assembly
+         loaded and the plugin must bind to *that* copy — a second one in the Plugins folder
+         gives the plugin a different IRpTool type from the one the host casts to, and the load
+         fails with a cast error between two types that print with the same name. -->
+    <ProjectReference Include="..\..\RpDashboard.Contracts\RpDashboard.Contracts.csproj">
+      <Private>false</Private>
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </ProjectReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Drops the built DLL straight into the host's plugin folder, so F5 on the host picks up
+         a rebuilt tool. This is the only line coupling the two projects, and it is the line to
+         delete when this project moves back to the unit-alert repository — there it builds on
+         its own and the DLL is copied in by hand or by a release script. -->
+    <None Include="$(TargetPath)" />
+  </ItemGroup>
+
+  <Target Name="CopyToDashboard" AfterTargets="Build"
+          Condition="Exists('$(MSBuildThisFileDirectory)..\..\RpDashboard.Host\bin\$(Configuration)\$(TargetFramework)')">
+    <Copy SourceFiles="$(TargetPath)"
+          DestinationFolder="$(MSBuildThisFileDirectory)..\..\RpDashboard.Host\bin\$(Configuration)\$(TargetFramework)\Plugins"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

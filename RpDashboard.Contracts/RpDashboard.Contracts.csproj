@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>RpDashboard.Contracts</AssemblyName>
+    <RootNamespace>RpDashboard.Contracts</RootNamespace>
+
+    <!-- This is the only assembly shared between the host and every plugin, so its
+         version is the compatibility currency. Bump the minor for additive changes
+         (new members on the host side that old plugins simply never call); bump
+         HostApi.Version in ApiVersion.cs only when a change breaks existing plugins. -->
+    <Version>1.0.0</Version>
+    <Product>RP Dashboard Contracts</Product>
+    <Description>The interface a tool implements to run inside RP Dashboard.</Description>
+  </PropertyGroup>
+
+</Project>

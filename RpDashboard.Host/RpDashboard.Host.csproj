@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>RpDashboard</AssemblyName>
+    <RootNamespace>RpDashboard.Host</RootNamespace>
+    <Version>1.0.0</Version>
+    <Product>RP Dashboard</Product>
+    <Description>One window, one connection to the game, for the GTA World RP tools.</Description>
+    <SelfContained>false</SelfContained>
+
+    <!-- Embedded into the exe's Win32 resources at build time. The tray icon reads it back out
+         of the running process rather than shipping a second copy of the file, which is the
+         arrangement Unit Alert settled on — see LoadAppIcon in MainWindow.xaml.cs. Replacing
+         Assets\rpdashboard.ico and rebuilding is enough; nothing else references the file. -->
+    <ApplicationIcon>Assets\rpdashboard.ico</ApplicationIcon>
+
+    <!-- Plugins are loaded by path from the Plugins folder, and each brings its own deps
+         alongside it. Nothing here should try to be a single file. -->
+    <PublishSingleFile>false</PublishSingleFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Inherited from Unit Alert, which needed UseWindowsForms for its tray icon: the SDK
+         injects project-wide implicit usings for System.Windows.Forms and System.Drawing, which
+         collide with WPF's Application, Button, TextBox, Brush and FontFamily. Removing the
+         implicit usings and referencing those types fully-qualified is the fix that worked
+         there. Don't re-add a blanket using — it reopens the ambiguity across every file at once.
+         System.Drawing is on this list for FontFamily specifically: Unit Alert never hit it
+         because it built its tab content in XAML, and the host builds tab headers in code. -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\RpDashboard.Contracts\RpDashboard.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The self-test exercises the feed's new-line detection and HTML stripping directly.
+         Neither is public: plugins get lines through IChatFeed and have no business reaching
+         into how they were derived. -->
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>RpDashboard.SelfTest</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+</Project>

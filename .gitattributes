@@ -1,0 +1,10 @@
+* text=auto
+
+# Binary: never touch these.
+*.ico binary
+*.png binary
+
+# PowerShell 5.1 reads a BOM-less script as ANSI, and the em dashes in build.ps1's comments
+# then decode into a curly quote that terminates a string early — the file stops parsing, at a
+# line nowhere near the actual character. Keep it out of any filter that might strip the BOM.
+*.ps1 -text

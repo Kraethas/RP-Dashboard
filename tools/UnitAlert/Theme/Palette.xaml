@@ -1,0 +1,41 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!--
+        Unit Alert's own key names, kept alive so its XAML converted without being rewritten.
+
+        The standalone app had its own greyscale palette in App.xaml; a plugin has no App.xaml,
+        and the host supplies one shared palette for the whole window. Rather than find-and-
+        replace every StaticResource in the view, the old names are redefined here in terms of
+        the new look. The view keeps saying WindowBackground and MutedText; what it gets is the
+        dashboard's colours.
+
+        The accents are the exception. They are semantic, not decorative: green means listening,
+        amber means a hit just landed, red means something is wrong, blue means AFK. Those map
+        onto the shared palette rather than being restated as raw hex, so a change to the
+        dashboard's colours carries through here too.
+    -->
+
+    <SolidColorBrush x:Key="WindowBackground"        Color="#191512"/>
+    <SolidColorBrush x:Key="FieldBackground"         Color="#100E0C"/>
+    <SolidColorBrush x:Key="FieldBorder"             Color="#2C251E"/>
+    <SolidColorBrush x:Key="ButtonBackground"        Color="#1F1A16"/>
+    <SolidColorBrush x:Key="ButtonBackgroundHover"   Color="#2A231C"/>
+    <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#17130F"/>
+    <SolidColorBrush x:Key="ButtonBorder"            Color="#2C251E"/>
+    <SolidColorBrush x:Key="PrimaryText"             Color="#EDE4D8"/>
+    <SolidColorBrush x:Key="MutedText"               Color="#8E8175"/>
+
+    <SolidColorBrush x:Key="ActiveAccent"            Color="#6FCF7C"/>
+    <SolidColorBrush x:Key="AlertAccent"             Color="#E9A64A"/>
+    <SolidColorBrush x:Key="ErrorAccent"             Color="#A83C2F"/>
+    <SolidColorBrush x:Key="AfkAccent"               Color="#8FB9C4"/>
+
+    <Style x:Key="FieldLabel" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource MutedText}"/>
+        <Setter Property="FontSize" Value="11"/>
+        <Setter Property="FontFamily" Value="Segoe UI Semibold"/>
+        <Setter Property="Margin" Value="0,0,0,4"/>
+    </Style>
+
+</ResourceDictionary>

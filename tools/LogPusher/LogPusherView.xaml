@@ -1,0 +1,86 @@
+<UserControl x:Class="LogPusherPanel.LogPusherView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="{StaticResource Ink}"
+             UseLayoutRounding="True"
+             TextOptions.TextFormattingMode="Display"
+             FontFamily="Segoe UI">
+
+    <!-- Every brush and style here comes from the host's App.xaml. This tab was written for the
+         dashboard rather than ported into it, so unlike the other three it needs no palette
+         compatibility file. -->
+
+    <DockPanel Margin="14">
+
+        <!-- Where LogPusher is. One setting: every path it uses hangs off its exe's folder. -->
+        <StackPanel DockPanel.Dock="Top">
+            <TextBlock Text="LOGPUSHER" Style="{StaticResource Label}" Margin="0,0,0,6"/>
+            <Grid Margin="0,0,0,14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="8"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="6"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBox x:Name="ExePathBox" Grid.Column="0" IsReadOnly="True"
+                         ToolTip="LogPusher.exe. Its folder is where state.json, logs\ and archive\ live."/>
+                <Button Grid.Column="2" Content="Browse..." Click="Browse_Click"/>
+                <Button Grid.Column="4" Content="Find it" Click="Detect_Click"
+                        ToolTip="Look for LogPusher in the usual places beside the dashboard."/>
+            </Grid>
+        </StackPanel>
+
+        <!-- Status. LogPusher runs headless all day, so this has to answer "is it alive and has
+             it done anything lately" without opening its window. -->
+        <Border DockPanel.Dock="Top" Background="{StaticResource Panel}"
+                BorderBrush="{StaticResource Rule}" BorderThickness="1"
+                Padding="12,10" Margin="0,0,0,12">
+            <StackPanel>
+                <DockPanel Margin="0,0,0,8">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Ellipse x:Name="StateDot" Width="8" Height="8" Margin="0,0,7,0"
+                                 Fill="{StaticResource Muted}" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="StateText" Text="Not configured" FontSize="13"
+                                   VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"
+                                HorizontalAlignment="Right">
+                        <Button x:Name="StartButton" Content="Start" Click="Start_Click"
+                                Style="{StaticResource Primary}" Margin="0,0,6,0"/>
+                        <Button x:Name="StopButton" Content="Stop" Click="Stop_Click"/>
+                    </StackPanel>
+                </DockPanel>
+
+                <TextBlock x:Name="SummaryText" Style="{StaticResource Label}"
+                           TextWrapping="Wrap" Text="Point at LogPusher.exe to begin."/>
+            </StackPanel>
+        </Border>
+
+        <!-- Footer -->
+        <DockPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
+            <StackPanel Orientation="Horizontal">
+                <Button Content="Open logs" Click="OpenLogs_Click" Margin="0,0,6,0"/>
+                <Button Content="Open archive" Click="OpenArchive_Click" Margin="0,0,6,0"/>
+                <Button Content="Copy log" Click="CopyLog_Click"
+                        ToolTip="Copy the visible decisions, for pasting into a bug report."/>
+            </StackPanel>
+            <TextBlock x:Name="RefreshText" Style="{StaticResource Label}"
+                       HorizontalAlignment="Right" VerticalAlignment="Center"/>
+        </DockPanel>
+
+        <StackPanel DockPanel.Dock="Top">
+            <TextBlock Text="WHAT IT DECIDED" Style="{StaticResource Label}" Margin="0,0,0,6"/>
+        </StackPanel>
+
+        <!-- The decision log is the file to read when a session did not show up in Notion:
+             every skip carries its reason. -->
+        <Border Background="{StaticResource Panel}" BorderBrush="{StaticResource Rule}"
+                BorderThickness="1">
+            <ScrollViewer x:Name="DecisionScroll" VerticalScrollBarVisibility="Auto" Padding="10,8">
+                <ItemsControl x:Name="DecisionList"/>
+            </ScrollViewer>
+        </Border>
+
+    </DockPanel>
+</UserControl>

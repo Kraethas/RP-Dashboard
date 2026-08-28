@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    LogPusher's control panel.
+
+    Unlike the other three tools this one is not a port. LogPusher is a Python program that reads
+    Afterline's chat *log files* off disk and pushes summaries to Notion; it never touches the
+    game, so it was never part of the connection problem the dashboard exists to solve, and there
+    is nothing to gain from rewriting 5,000 lines of Python or embedding CPython to host it.
+
+    So this tab drives the existing LogPusher.exe instead: start it, stop it, and read the
+    state.json and logs/decisions.jsonl it already writes. LogPusher keeps its own repository and
+    its own release cycle entirely, and still runs headless with or without the dashboard open.
+
+    This project lives in the dashboard's repository rather than LogPusher's because it shares no
+    source with it — it is dashboard-side glue, not part of the tool.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>LogPusherPanel</AssemblyName>
+    <RootNamespace>LogPusherPanel</RootNamespace>
+    <Version>1.0.0</Version>
+    <Product>LogPusher panel</Product>
+    <Description>Start, stop and watch the LogPusher session archiver.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\RpDashboard.Contracts\RpDashboard.Contracts.csproj">
+      <Private>false</Private>
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </ProjectReference>
+  </ItemGroup>
+
+  <PropertyGroup>
+    <DashboardPlugins>$(MSBuildThisFileDirectory)..\..\RpDashboard.Host\bin\$(Configuration)\$(TargetFramework)\Plugins</DashboardPlugins>
+  </PropertyGroup>
+
+  <Target Name="CopyToDashboard" AfterTargets="Build" Condition="Exists('$(DashboardPlugins)')">
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(DashboardPlugins)" SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>
