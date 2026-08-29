@@ -94,6 +94,26 @@ A sidecar `.lines.jsonl` carries the sequence number and the colour each line wa
 what the text format cannot hold, and the raw material for the constants Street Medic still
 lacks. Afterline captures colour too, into a `.colors.jsonl` nothing ever reads.
 
+### Three things that bit on the way in
+
+All in `ChatLogWriter`, all shipped once and all now covered by the self-test:
+
+- **The flush timer runs on a threadpool thread.** It raised `Progress` from there, a handler
+  set a `TextBlock`, WPF threw, and nothing catches an exception on a threadpool thread — the
+  app died a few seconds after launch with nothing in any log. The writer takes a `Dispatcher`
+  now, like every other host service, and the timer callback has a catch-all. It survived the
+  smoke tests because with no game running there are no lines and the flush returns early.
+- **GTAW stamps its own lines.** Most text arriving from the feed already begins `[HH:MM:SS] `,
+  so prefixing another produced `[00:19:45] [21:13:01] Welcome...` — the outer stamp merely
+  recording when we read it, and a stray one left in the body once LogPusher strips the first.
+  The game's stamp is kept where there is one.
+- **`_currentDay` starts unset**, so the rollover test fired on the first write of every run,
+  marking a date change each time the dashboard was merely reopened.
+
+`%LOCALAPPDATA%\RpDashboard\crash.log` now records anything unhandled, on any thread. The first
+of those bugs was only diagnosable through Event Viewer, which is no use for an app that lives
+in the tray.
+
 ### Phase 1: run both, then compare
 
 Afterline is **not** to be switched off yet.

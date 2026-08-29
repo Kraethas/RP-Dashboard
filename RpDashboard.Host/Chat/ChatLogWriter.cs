@@ -1,6 +1,8 @@
 using System.IO;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
+using System.Windows.Threading;
 using RpDashboard.Contracts;
 
 namespace RpDashboard.Host.Chat;
@@ -36,6 +38,18 @@ internal sealed class ChatLogWriter : IDisposable
     private const string ServerHeader = "[SERVER: GTAWorld Roleplay English]";
 
     /// <summary>
+    /// GTAW's HUD prints its own "[HH:MM:SS] " in front of most lines, so the text arriving from
+    /// the feed usually carries one already. Prefixing another produced
+    /// "[00:19:45] [21:13:01] Welcome to GTA World ." — two stamps, the outer one being merely
+    /// when we happened to read it, and a stray timestamp left sitting in the body once
+    /// LogPusher strips the first.
+    ///
+    /// The game's own stamp is both correct and the one Afterline records, so where there is one
+    /// it is kept and nothing is added.
+    /// </summary>
+    private static readonly Regex AlreadyStamped = new(@"^\[\d{2}:\d{2}:\d{2}\]\s", RegexOptions.Compiled);
+
+    /// <summary>
     /// Lines are queued and written by a timer rather than inline. The feed delivers on the UI
     /// thread, and a stalled disk must not be able to hitch the window.
     /// </summary>
@@ -49,6 +63,7 @@ internal sealed class ChatLogWriter : IDisposable
     private static readonly Encoding FileEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
     private readonly IChatFeed _feed;
+    private readonly Dispatcher _dispatcher;
     private readonly string _directory;
     private readonly object _gate = new();
     private readonly Queue<ChatLine> _pending = new();
@@ -58,9 +73,10 @@ internal sealed class ChatLogWriter : IDisposable
     private DateTime _currentDay = DateTime.MinValue;
     private bool _disposed;
 
-    public ChatLogWriter(IChatFeed feed, string directory)
+    public ChatLogWriter(IChatFeed feed, Dispatcher dispatcher, string directory)
     {
         _feed = feed;
+        _dispatcher = dispatcher;
         _directory = directory;
     }
 
@@ -72,11 +88,23 @@ internal sealed class ChatLogWriter : IDisposable
 
     public bool IsRunning => _subscription is not null;
 
-    /// <summary>Raised when a line is written, for the status bar. On the UI thread.</summary>
+    /// <summary>
+    /// Raised when a line is written, for the status bar.
+    ///
+    /// Marshalled to the UI thread, because the flush runs on a timer and every other host
+    /// service does the same. Raising it from the timer's thread crashed the app: a handler set
+    /// a TextBlock, WPF threw, and nothing catches an exception on a threadpool thread.
+    /// </summary>
     public event EventHandler? Progress;
 
     /// <summary>Raised with a human-readable reason when writing fails. On the UI thread.</summary>
     public event EventHandler<string>? Failed;
+
+    private void Raise(Action action)
+    {
+        if (_dispatcher.CheckAccess()) action();
+        else _dispatcher.BeginInvoke(action);
+    }
 
     public void Start()
     {
@@ -93,7 +121,12 @@ internal sealed class ChatLogWriter : IDisposable
         });
 
         _subscription.LineReceived += OnLine;
-        _flushTimer = new System.Threading.Timer(_ => Flush(), null, FlushInterval, FlushInterval);
+
+        // The catch is the important part, not the flush. This callback runs on a threadpool
+        // thread for the life of the process, and anything that escapes it takes the whole app
+        // down with no window, no message and nothing in the log — which is exactly what
+        // happened the first time this shipped.
+        _flushTimer = new System.Threading.Timer(_ => SafeFlush(), null, FlushInterval, FlushInterval);
     }
 
     public void Stop()
@@ -110,6 +143,18 @@ internal sealed class ChatLogWriter : IDisposable
         // Whatever is queued is written now: the alternative is losing the last couple of
         // seconds of a session every time the dashboard closes.
         Flush();
+    }
+
+    private void SafeFlush()
+    {
+        try
+        {
+            Flush();
+        }
+        catch (Exception ex)
+        {
+            Raise(() => Failed?.Invoke(this, ex.Message));
+        }
     }
 
     private void OnLine(object? sender, ChatLine line)
@@ -132,7 +177,7 @@ internal sealed class ChatLogWriter : IDisposable
         {
             Write(batch);
             LinesWritten += batch.Length;
-            Progress?.Invoke(this, EventArgs.Empty);
+            Raise(() => Progress?.Invoke(this, EventArgs.Empty));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -143,7 +188,7 @@ internal sealed class ChatLogWriter : IDisposable
                 foreach (ChatLine line in batch.Reverse()) _pending.Enqueue(line);
             }
 
-            Failed?.Invoke(this, ex.Message);
+            Raise(() => Failed?.Invoke(this, ex.Message));
         }
     }
 
@@ -166,20 +211,23 @@ internal sealed class ChatLogWriter : IDisposable
             text.AppendLine();
         }
 
-        if (day != _currentDay)
-        {
-            // A session running past midnight lands in the new day's file, marked, rather than
-            // silently continuing in yesterday's. Afterline does the same.
-            if (!isNewFile || _currentDay != DateTime.MinValue)
-                text.AppendLine($"==================== [DATE ROLLOVER] - 00:00:00 ====================");
+        // A session running past midnight is marked, the way Afterline marks it.
+        //
+        // Only within one run, though. _currentDay starts unset, so the original test also fired
+        // on the first write after every restart — appending a rollover marker to an existing
+        // file each time the dashboard was opened, which is not a date change at all.
+        if (_currentDay != DateTime.MinValue && day != _currentDay)
+            text.AppendLine("==================== [DATE ROLLOVER] - 00:00:00 ====================");
 
-            _currentDay = day;
-        }
+        _currentDay = day;
 
         foreach (ChatLine line in batch)
         {
-            text.Append('[').Append(line.SeenAt.ToString("HH:mm:ss")).Append("] ")
-                .AppendLine(line.Text);
+            if (AlreadyStamped.IsMatch(line.Text))
+                text.AppendLine(line.Text);
+            else
+                text.Append('[').Append(line.SeenAt.ToString("HH:mm:ss")).Append("] ")
+                    .AppendLine(line.Text);
 
             meta.AppendLine(JsonSerializer.Serialize(new LogRecord(
                 line.Sequence,

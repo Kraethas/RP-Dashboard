@@ -51,7 +51,7 @@ public partial class MainWindow : Window
         _audio = new AudioService(Dispatcher);
         _clipboard = new ClipboardService(Dispatcher);
 
-        _chatLog = new ChatLogWriter(_chat, ChatLogDirectory());
+        _chatLog = new ChatLogWriter(_chat, Dispatcher, ChatLogDirectory());
         _chatLog.Progress += (_, _) => ShowChatLogStatus();
         _chatLog.Failed += (_, message) => ToolStatusText.Text = "Chat log: " + message;
 

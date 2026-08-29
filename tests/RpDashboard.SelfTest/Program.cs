@@ -1,4 +1,5 @@
 using System.IO;
+using System.Windows.Threading;
 using RpDashboard.Contracts;
 using RpDashboard.Host.Chat;
 using RpDashboard.Host.Hosting;
@@ -132,7 +133,7 @@ public static class Program
     private static int WriteSample(string directory)
     {
         var feed = new FakeFeed();
-        using var writer = new ChatLogWriter(feed, directory);
+        using var writer = new ChatLogWriter(feed, Dispatcher.CurrentDispatcher, directory);
         writer.Start();
 
         var start = new DateTime(2026, 8, 29, 9, 30, 0);
@@ -171,7 +172,7 @@ public static class Program
         try
         {
             var feed = new FakeFeed();
-            using (var writer = new ChatLogWriter(feed, directory))
+            using (var writer = new ChatLogWriter(feed, Dispatcher.CurrentDispatcher, directory))
             {
                 writer.Start();
 
@@ -180,6 +181,10 @@ public static class Program
                     "<li><span style=\"color:#ffffff\">x</span></li>", seen));
                 feed.Emit(new ChatLine(2, "(( Marta: brb ))",
                     "<li><span style=\"color:#28B4BF\">x</span></li>", seen.AddSeconds(4)));
+
+                // GTAW's HUD stamps most lines itself, so this is what the feed usually hands over.
+                feed.Emit(new ChatLine(3, "[21:13:01] Welcome to GTA World .",
+                    "<li><span style=\"color:#1e90ff\">x</span></li>", seen.AddSeconds(9)));
 
                 writer.Stop();
             }
@@ -207,11 +212,78 @@ public static class Program
             Check("every line is written exactly once",
                 lines.Count(l => l.EndsWith("evening.", StringComparison.Ordinal)) == 1);
 
+            // "[00:19:45] [21:13:01] Welcome..." is what the first version wrote: two stamps,
+            // the outer one merely recording when we read it, and a stray one left in the body
+            // once LogPusher strips the first.
+            Check("a line the game already stamped is not stamped again",
+                lines.Any(l => l == "[21:13:01] Welcome to GTA World ."));
+
+            Check("no line carries two timestamps",
+                !lines.Any(l => System.Text.RegularExpressions.Regex.IsMatch(
+                    l, @"^\[\d{2}:\d{2}:\d{2}\]\s+\[\d{2}:\d{2}:\d{2}\]")));
+
+            // _currentDay starts unset, so the original rollover test fired on the first write
+            // of every run — marking a date change each time the dashboard was merely reopened.
+            Check("reopening does not fake a date rollover",
+                !lines.Any(l => l.Contains("DATE ROLLOVER", StringComparison.Ordinal)));
+
             // The sidecar is what Afterline throws away: colour, which is the raw material for
             // the constants Street Medic is still missing.
             string metaText = meta is null ? "" : File.ReadAllText(meta);
             Check("the sidecar records the colour", metaText.Contains("#28b4bf"));
             Check("the sidecar records the sequence", metaText.Contains("\"Seq\":2"));
+        }
+        finally
+        {
+            try { Directory.Delete(directory, recursive: true); } catch { /* temp */ }
+        }
+
+        TimerThreadTest();
+    }
+
+    /// <summary>
+    /// The flush timer runs on a threadpool thread, and this is the regression test for what
+    /// that cost the first time: the writer raised Progress straight from that thread, a handler
+    /// set a TextBlock, WPF threw, and nothing catches an exception on a threadpool thread — so
+    /// the app died a few seconds after launch with nothing in any log.
+    ///
+    /// The test above never caught it because it calls Stop(), which flushes on the calling
+    /// thread. Only the timer path has the bug, so only the timer path proves the fix.
+    /// </summary>
+    private static void TimerThreadTest()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "rp-dashboard-timer-" + Guid.NewGuid().ToString("N"));
+        int uiThread = Environment.CurrentManagedThreadId;
+        int handlerThread = 0;
+        var exploded = false;
+
+        try
+        {
+            var feed = new FakeFeed();
+            using (var writer = new ChatLogWriter(feed, Dispatcher.CurrentDispatcher, directory))
+            {
+                writer.Start();
+
+                // A handler of exactly the kind that crashed it: one that would touch the UI.
+                writer.Progress += (_, _) =>
+                {
+                    handlerThread = Environment.CurrentManagedThreadId;
+                    exploded = true;
+                };
+
+                feed.Emit(new ChatLine(1, "timer path", "<li><span>x</span></li>", DateTime.Now));
+
+                // Long enough for the 2s flush timer to fire on its own.
+                Thread.Sleep(2600);
+
+                Check("the timer wrote without being told to",
+                    Directory.Exists(directory) && Directory.GetFiles(directory, "*.txt").Length == 1);
+
+                // Nothing pumps a dispatcher in a console app, so a properly marshalled Progress
+                // is queued and never runs here. If it did run, it ran on the timer's thread.
+                Check("Progress is not raised on the timer's thread",
+                    !exploded || handlerThread == uiThread);
+            }
         }
         finally
         {
