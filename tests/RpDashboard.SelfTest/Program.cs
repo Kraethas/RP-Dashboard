@@ -21,11 +21,28 @@ public static class Program
     {
         if (args.Contains("--live")) return Live.Run().GetAwaiter().GetResult();
 
+        if (args.Contains("--sample"))
+        {
+            // Writes a log through the real ChatLogWriter and leaves it, so LogPusher's Python
+            // parser can be pointed at genuine output rather than at a hand-made imitation of it.
+            int at = Array.IndexOf(args, "--sample");
+            return WriteSample(at + 1 < args.Length ? args[at + 1] : ".");
+        }
+
+        if (args.Contains("--compare"))
+        {
+            int at = Array.IndexOf(args, "--compare");
+            return Compare.Run(at + 1 < args.Length ? args[at + 1] : null);
+        }
+
         Section("new-line detection (the scrolling-window overlap rule)");
         NewLineTests();
 
         Section("outerHTML to plain text");
         HtmlTests();
+
+        Section("chat log writing");
+        ChatLogTests();
 
         Section("plugin loading");
         PluginTests();
@@ -112,6 +129,146 @@ public static class Program
     /// instantiated through the contract alone. If the contract ever drifts, this fails here
     /// rather than as an empty window.
     /// </summary>
+    private static int WriteSample(string directory)
+    {
+        var feed = new FakeFeed();
+        using var writer = new ChatLogWriter(feed, directory);
+        writer.Start();
+
+        var start = new DateTime(2026, 8, 29, 9, 30, 0);
+        (string text, string colour)[] script =
+        {
+            ("Stats for Ilya Morozov(#65887) (Kraethas#123456)", "#1e90ff"),
+            ("Ilya Morozov says: evening.", "#ffffff"),
+            ("* Ilya Morozov wipes his hands on his apron.", "#c2a2da"),
+            ("(( Marta Alvarez: brb ))", "#28b4bf"),
+            ("* The register jams. ((Ilya Morozov))", "#c2a2da"),
+            ("Ilya Morozov says: evening.", "#ffffff"),
+        };
+
+        for (int i = 0; i < script.Length; i++)
+        {
+            feed.Emit(new ChatLine(
+                i + 1, script[i].text,
+                $"<li style=\"color: rgb(255,255,255);\"><span style=\"color:{script[i].colour}\">x</span></li>",
+                start.AddSeconds(i * 30)));
+        }
+
+        writer.Stop();
+        Console.WriteLine(writer.CurrentFile);
+        return 0;
+    }
+
+    /// <summary>
+    /// The log the dashboard writes has to be readable by LogPusher without changing LogPusher,
+    /// which means matching Afterline's filename shape and line format exactly. That is the
+    /// whole reason the format was not designed freely.
+    /// </summary>
+    private static void ChatLogTests()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "rp-dashboard-log-" + Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            var feed = new FakeFeed();
+            using (var writer = new ChatLogWriter(feed, directory))
+            {
+                writer.Start();
+
+                var seen = new DateTime(2026, 8, 29, 14, 3, 11);
+                feed.Emit(new ChatLine(1, "Ilya Morozov says: evening.",
+                    "<li><span style=\"color:#ffffff\">x</span></li>", seen));
+                feed.Emit(new ChatLine(2, "(( Marta: brb ))",
+                    "<li><span style=\"color:#28B4BF\">x</span></li>", seen.AddSeconds(4)));
+
+                writer.Stop();
+            }
+
+            string[] files = Directory.GetFiles(directory);
+            string? text = files.FirstOrDefault(f => f.EndsWith(".txt", StringComparison.Ordinal));
+            string? meta = files.FirstOrDefault(f => f.EndsWith(".lines.jsonl", StringComparison.Ordinal));
+
+            _checks++;
+            bool named = text is not null &&
+                         Path.GetFileName(text) == "Chatlog [GTAWorld Roleplay English] [29-August-2026].txt";
+            Console.WriteLine(named
+                ? "  ok   the filename is the one LogPusher recognises"
+                : $"  FAIL filename was {(text is null ? "(none)" : Path.GetFileName(text))}");
+            if (!named) _failures++;
+
+            string[] lines = text is null ? Array.Empty<string>() : File.ReadAllLines(text);
+
+            Check("the server header is written first",
+                lines.FirstOrDefault() == "[SERVER: GTAWorld Roleplay English]");
+
+            Check("lines carry a [HH:MM:SS] stamp and the text",
+                lines.Any(l => l == "[14:03:11] Ilya Morozov says: evening."));
+
+            Check("every line is written exactly once",
+                lines.Count(l => l.EndsWith("evening.", StringComparison.Ordinal)) == 1);
+
+            // The sidecar is what Afterline throws away: colour, which is the raw material for
+            // the constants Street Medic is still missing.
+            string metaText = meta is null ? "" : File.ReadAllText(meta);
+            Check("the sidecar records the colour", metaText.Contains("#28b4bf"));
+            Check("the sidecar records the sequence", metaText.Contains("\"Seq\":2"));
+        }
+        finally
+        {
+            try { Directory.Delete(directory, recursive: true); } catch { /* temp */ }
+        }
+    }
+
+    /// <summary>A feed that emits exactly what a test tells it to.</summary>
+    private sealed class FakeFeed : IChatFeed
+    {
+        private readonly List<Subscription> _subscriptions = new();
+
+        public bool IsConnected => true;
+        public ChatFeedStatus Status => new(ChatFeedState.Reading, "fake");
+        public event EventHandler<ChatFeedStatus>? StatusChanged;
+
+        public IChatSubscription Subscribe(ChatSubscriptionOptions options)
+        {
+            var subscription = new Subscription(this);
+            _subscriptions.Add(subscription);
+            _ = StatusChanged;
+            return subscription;
+        }
+
+        public Task<IReadOnlyList<ChatLine>> SnapshotAsync(int maxLines, CancellationToken token = default)
+            => Task.FromResult<IReadOnlyList<ChatLine>>(Array.Empty<ChatLine>());
+
+        public void Emit(ChatLine line)
+        {
+            foreach (Subscription subscription in _subscriptions.ToArray())
+                subscription.Deliver(line);
+        }
+
+        private sealed class Subscription : IChatSubscription
+        {
+            private readonly FakeFeed _feed;
+            public Subscription(FakeFeed feed) => _feed = feed;
+
+            public event EventHandler<ChatLine>? LineReceived;
+            public bool IsPaused { get; set; }
+
+            public void Deliver(ChatLine line)
+            {
+                if (!IsPaused) LineReceived?.Invoke(this, line);
+            }
+
+            public void Dispose() => _feed._subscriptions.Remove(this);
+        }
+    }
+
+    private static void Check(string name, bool ok)
+    {
+        _checks++;
+        Console.WriteLine(ok ? $"  ok   {name}" : $"  FAIL {name}");
+        if (!ok) _failures++;
+    }
+
     private static void PluginTests()
     {
         string? plugins = FindPluginsFolder();

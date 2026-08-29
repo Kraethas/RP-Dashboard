@@ -17,12 +17,26 @@ namespace RpDashboard.Host;
 /// strip, the tray icon, the one status bar, and the wiring that lets three tools share one
 /// connection to the game.
 /// </summary>
+/// <summary>The host's own settings, as opposed to any tool's.</summary>
+public sealed class HostSettings
+{
+    /// <summary>
+    /// On by default. The chat log only earns its place by being compared against Afterline's
+    /// over several real sessions, and that cannot happen if it has to be remembered each time.
+    /// Costs nothing extra either way: the connection is already open for whatever tools are
+    /// running, and this only writes what the feed was already reporting.
+    /// </summary>
+    public bool ChatLogEnabled { get; set; } = true;
+}
+
 public partial class MainWindow : Window
 {
     private readonly ChatFeed _chat;
     private readonly AudioService _audio;
     private readonly ClipboardService _clipboard;
     private readonly HotkeyService _hotkeys = new();
+    private readonly ChatLogWriter _chatLog;
+    private readonly SettingsScope _hostSettings = new("RpDashboard", "host.json");
     private readonly List<ToolHost> _hosts = new();
     private readonly Dictionary<ToolHost, TabItem> _tabs = new();
 
@@ -36,6 +50,15 @@ public partial class MainWindow : Window
         _chat = new ChatFeed(Dispatcher);
         _audio = new AudioService(Dispatcher);
         _clipboard = new ClipboardService(Dispatcher);
+
+        _chatLog = new ChatLogWriter(_chat, ChatLogDirectory());
+        _chatLog.Progress += (_, _) => ShowChatLogStatus();
+        _chatLog.Failed += (_, message) => ToolStatusText.Text = "Chat log: " + message;
+
+        // Rare, and the log writer is the subscriber it matters to: the tools only ever wanted
+        // new lines, but this one is keeping the only copy of the chat that will ever exist.
+        _chat.GapSuspected += (_, _) =>
+            ToolStatusText.Text = "Chat came in faster than it could be read — some may be missing.";
 
         _chat.StatusChanged += (_, status) => ShowConnectionStatus(status);
         _audio.PlaybackFailed += (_, failure) =>
@@ -58,6 +81,11 @@ public partial class MainWindow : Window
         SetUpTrayIcon();
         LoadTools();
         ShowConnectionStatus(_chat.Status);
+
+        HostSettings settings = _hostSettings.Load(new HostSettings());
+        ChatLogBox.IsChecked = settings.ChatLogEnabled;
+        if (settings.ChatLogEnabled) _chatLog.Start();
+        ShowChatLogStatus();
     }
 
     private void LoadTools()
@@ -276,6 +304,52 @@ public partial class MainWindow : Window
         };
     }
 
+    /// <summary>
+    /// Where the chat log is written. Beside Afterline's own folder would invite confusion
+    /// while both are running, so it lives with the dashboard's other state.
+    /// </summary>
+    private static string ChatLogDirectory()
+        => Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "RpDashboard", "ChatLogs");
+
+    private void OnChatLogChanged(object sender, RoutedEventArgs e)
+    {
+        bool enabled = ChatLogBox.IsChecked == true;
+
+        if (enabled) _chatLog.Start();
+        else _chatLog.Stop();
+
+        _hostSettings.Save(new HostSettings { ChatLogEnabled = enabled });
+        ShowChatLogStatus();
+    }
+
+    private void ShowChatLogStatus()
+        => ChatLogText.Text = _chatLog.IsRunning
+            ? $"log {_chatLog.LinesWritten:N0}"
+            : string.Empty;
+
+    private void OnChatLogClicked(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        string directory = ChatLogDirectory();
+
+        if (!Directory.Exists(directory))
+        {
+            ToolStatusText.Text = "Nothing written yet — the folder appears with the first line.";
+            return;
+        }
+
+        try
+        {
+            System.Diagnostics.Process.Start(
+                new System.Diagnostics.ProcessStartInfo { FileName = directory, UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            ToolStatusText.Text = "Couldn't open it: " + ex.Message;
+        }
+    }
+
     private void OnMuteChanged(object sender, RoutedEventArgs e)
     {
         bool muted = MuteBox.IsChecked == true;
@@ -365,6 +439,10 @@ public partial class MainWindow : Window
             // icon behind after the window is gone.
             try { host.Tool.Shutdown(); } catch { /* going away regardless */ }
         }
+
+        // Before the feed goes: this drains whatever is queued, so the last couple of seconds
+        // of a session are not lost every time the dashboard closes.
+        _chatLog.Dispose();
 
         _hotkeys.Dispose();
         _audio.Dispose();

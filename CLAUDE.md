@@ -66,6 +66,54 @@ All in `Chat/ChatFeed.cs`, and all worth preserving:
   tags in C# is cheaper than asking the game to serialise a second array.
 - **The poll interval is the shortest any active subscription asked for**, floored at 250 ms.
 
+## The chat log (replacing Afterline)
+
+`Chat/ChatLogWriter.cs` writes the chat to disk as it arrives, deduplicated, into
+`%LOCALAPPDATA%\RpDashboard\ChatLogs`. On by default; the status bar carries the toggle and a
+line count, and clicking the count opens the folder.
+
+It exists to make Afterline unnecessary. Afterline is a separate program scraping the same HUD
+through the same DevTools port, so it costs a second connection to the game and 69 MB — and it
+re-reads the buffer hard enough that **73% of what it writes is duplicates** (22,738 of 31,148
+lines across five days; one 1.5 MB file was 79% repeats). LogPusher then spends a whole pass
+throwing them away, and every agent call reads a file that is four-fifths noise.
+
+The dashboard already solved that problem: `ChatFeed` reports each line exactly once, so
+writing what it hands over is clean by construction.
+
+**The format is deliberately Afterline's**, because LogPusher identifies that format from the
+filename alone (`Chatlog [GTAWorld Roleplay English] [29-August-2026].txt`) and reads
+`[HH:MM:SS] text` bodies. Pointing LogPusher at this folder needs no change to LogPusher —
+verified by parsing real writer output with its Python parser: recognised as `afterline`, date
+derived, session built, 0 duplicates. Two details that matter and are easy to undo by accident:
+the filename must use `CultureInfo.InvariantCulture` (an English regex reads that month name on
+a non-English machine), and the file must be written **without a BOM**, because LogPusher opens
+it as `utf-8` rather than `utf-8-sig`.
+
+A sidecar `.lines.jsonl` carries the sequence number and the colour each line was drawn in —
+what the text format cannot hold, and the raw material for the constants Street Medic still
+lacks. Afterline captures colour too, into a `.colors.jsonl` nothing ever reads.
+
+### Phase 1: run both, then compare
+
+Afterline is **not** to be switched off yet.
+
+```
+dotnet run --project tests/RpDashboard.SelfTest -- --compare [29-August-2026]
+```
+
+That reports lines Afterline saw and we did not, which is the only number that decides whether
+switching is safe. Duplicates on their side are expected and are the point.
+
+The risk being measured is real and runs the opposite way to Afterline's bug. FiveM never writes
+chat to disk, so this log only exists while the dashboard is open: **Afterline's duplication is
+noisy but safe, a tail-based reader is quiet but lossy.** The measured headroom is comfortable —
+peak observed chat is 24 lines/sec against a 240/sec read — and `ChatFeed.GapSuspected` fires
+when a poll finds no overlap at all with the previous one, which is the case where lines went by
+unseen. The status bar says so rather than swallowing it.
+
+Switch Afterline off once several days compare clean, not before.
+
 ## Invariants — do not break these
 
 1. **Read-only.** Nothing in `IChatFeed` writes to the game and nothing ever should. This is the

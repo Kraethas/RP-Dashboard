@@ -61,6 +61,16 @@ internal sealed class ChatFeed : IChatFeed, IAsyncDisposable
 
     public event EventHandler<ChatFeedStatus>? StatusChanged;
 
+    /// <summary>
+    /// Raised when a poll found no overlap with the previous one, so chat may have gone by
+    /// unseen. Rare: it takes more than a full HUD buffer between two polls, and the observed
+    /// peak in real play is 24 lines a second against a 240-a-second read. On the UI thread.
+    /// </summary>
+    public event EventHandler? GapSuspected;
+
+    private void RaiseGapSuspected()
+        => _dispatcher.BeginInvoke(() => GapSuspected?.Invoke(this, EventArgs.Empty));
+
     public IChatSubscription Subscribe(ChatSubscriptionOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -168,7 +178,8 @@ internal sealed class ChatFeed : IChatFeed, IAsyncDisposable
                 }
                 else
                 {
-                    Publish(NewLinesSince(_previousHtml, html));
+                    Publish(NewLinesSince(_previousHtml, html, out bool gap));
+                    if (gap) RaiseGapSuspected();
                     _previousHtml = html;
                     retry = MinRetry;
                     wait = CurrentInterval();
@@ -250,7 +261,24 @@ internal sealed class ChatFeed : IChatFeed, IAsyncDisposable
     internal static IReadOnlyList<string> NewLinesSince(
         IReadOnlyList<string> previous,
         IReadOnlyList<string> current)
+        => NewLinesSince(previous, current, out _);
+
+    /// <param name="gapSuspected">
+    /// True when no overlap could be found at all between two non-empty reads. That means more
+    /// than a full buffer's worth arrived between polls, so some of it was never seen — or the
+    /// HUD was cleared, which is indistinguishable from here.
+    ///
+    /// Worth surfacing rather than swallowing. The tools only ever needed *new* lines and could
+    /// treat a gap as nothing much; the log writer is keeping the only copy of this chat that
+    /// will ever exist, and quietly missing some of it is the one failure it must not have.
+    /// </param>
+    internal static IReadOnlyList<string> NewLinesSince(
+        IReadOnlyList<string> previous,
+        IReadOnlyList<string> current,
+        out bool gapSuspected)
     {
+        gapSuspected = false;
+
         if (current.Count == 0) return Array.Empty<string>();
 
         // Nothing to compare against: the caller is responsible for treating a first read as a
@@ -278,7 +306,8 @@ internal sealed class ChatFeed : IChatFeed, IAsyncDisposable
         }
 
         // No overlap at all — the buffer rolled over entirely between polls, or the HUD was
-        // cleared. Everything visible is new.
+        // cleared. Everything visible is new, and something may not have been seen.
+        gapSuspected = true;
         return current;
     }
 
