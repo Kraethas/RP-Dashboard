@@ -114,6 +114,25 @@ All in `ChatLogWriter`, all shipped once and all now covered by the self-test:
 of those bugs was only diagnosable through Event Viewer, which is no use for an app that lives
 in the tray.
 
+### The clock is the game's, not this machine's
+
+GTA World stamps each line with the server's time. Measured here that is three hours behind
+local, and it will change with daylight saving or a move. **The log is kept on the game's clock**
+— including the date in the filename — because every other player's log is on that clock, and a
+log that cannot be lined up against someone else's is worth much less if it is ever needed.
+
+`Chat/GameClock.cs` recovers it. The HUD only gives a time of day, never a date, so the date is
+inferred: of yesterday, today and tomorrow, take whichever puts the stamp nearest the moment the
+line was read. That resolves any offset without configuring a timezone, and keeps resolving
+across midnight in either clock. Unstamped lines — there are some — carry the last known offset
+forward rather than falling back to local time.
+
+The first version got this half right: it preserved the game's stamps in the bodies but named
+files by the local date. One session was then filed under a single day here while Afterline
+split it across two. LogPusher takes a session's date from the filename and its times from the
+body, so those two disagreeing is exactly the class of quiet mismatch that has already cost this
+project twice.
+
 ### Phase 1: run both, then compare
 
 Afterline is **not** to be switched off yet.

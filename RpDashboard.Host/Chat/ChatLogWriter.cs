@@ -68,6 +68,13 @@ internal sealed class ChatLogWriter : IDisposable
     private readonly object _gate = new();
     private readonly Queue<ChatLine> _pending = new();
 
+    /// <summary>
+    /// The log is kept on the game's clock, not this machine's. Every other player's log is on
+    /// the game's clock, and a log that cannot be lined up against someone else's is worth much
+    /// less if it is ever needed.
+    /// </summary>
+    private readonly GameClock _gameClock = new();
+
     private IChatSubscription? _subscription;
     private System.Threading.Timer? _flushTimer;
     private DateTime _currentDay = DateTime.MinValue;
@@ -196,8 +203,19 @@ internal sealed class ChatLogWriter : IDisposable
     {
         Directory.CreateDirectory(_directory);
 
-        DateTime day = batch[0].SeenAt.Date;
-        string path = Path.Combine(_directory, FileName(day));
+        // Grouped by the game's day, not this machine's, so a batch that straddles the game's
+        // midnight lands in two files exactly as Afterline would have written it.
+        foreach (IGrouping<DateTime, (ChatLine Line, DateTime GameTime)> day in batch
+                     .Select(line => (Line: line, GameTime: _gameClock.TimeOf(line.Text, line.SeenAt)))
+                     .GroupBy(entry => entry.GameTime.Date))
+        {
+            WriteDay(day.Key, day.ToArray());
+        }
+    }
+
+    private void WriteDay(DateTime gameDay, IReadOnlyList<(ChatLine Line, DateTime GameTime)> entries)
+    {
+        string path = Path.Combine(_directory, FileName(gameDay));
         bool isNewFile = !File.Exists(path);
 
         var text = new StringBuilder();
@@ -211,27 +229,31 @@ internal sealed class ChatLogWriter : IDisposable
             text.AppendLine();
         }
 
-        // A session running past midnight is marked, the way Afterline marks it.
+        // A session running past the game's midnight is marked, the way Afterline marks it.
         //
         // Only within one run, though. _currentDay starts unset, so the original test also fired
         // on the first write after every restart — appending a rollover marker to an existing
         // file each time the dashboard was opened, which is not a date change at all.
-        if (_currentDay != DateTime.MinValue && day != _currentDay)
+        if (_currentDay != DateTime.MinValue && gameDay != _currentDay)
             text.AppendLine("==================== [DATE ROLLOVER] - 00:00:00 ====================");
 
-        _currentDay = day;
+        _currentDay = gameDay;
 
-        foreach (ChatLine line in batch)
+        foreach ((ChatLine line, DateTime gameTime) in entries)
         {
+            // The HUD stamps most lines itself, and its stamp is the game's own. Where there
+            // isn't one, the time is reconstructed on the game's clock rather than borrowing
+            // this machine's — the whole file has to be on one clock to be worth anything.
             if (AlreadyStamped.IsMatch(line.Text))
                 text.AppendLine(line.Text);
             else
-                text.Append('[').Append(line.SeenAt.ToString("HH:mm:ss")).Append("] ")
+                text.Append('[').Append(gameTime.ToString("HH:mm:ss")).Append("] ")
                     .AppendLine(line.Text);
 
             meta.AppendLine(JsonSerializer.Serialize(new LogRecord(
                 line.Sequence,
-                line.SeenAt.ToString("HH:mm:ss"),
+                gameTime.ToString("HH:mm:ss"),
+                gameTime.ToString("o"),
                 line.SeenAt.ToString("o"),
                 line.Text,
                 ChatColour.Of(line.RawHtml))));
@@ -257,5 +279,12 @@ internal sealed class ChatLogWriter : IDisposable
         Stop();
     }
 
-    private sealed record LogRecord(long Seq, string Time, string Timestamp, string Text, string? Colour);
+    /// <param name="Time">Game time of day, matching the text file.</param>
+    /// <param name="GameTime">Full game timestamp — the clock every other player's log is on.</param>
+    /// <param name="ReadAt">
+    /// When the dashboard read the line, on this machine's clock. Kept only so the offset
+    /// between the two is recoverable after the fact; nothing should prefer it.
+    /// </param>
+    private sealed record LogRecord(
+        long Seq, string Time, string GameTime, string ReadAt, string Text, string? Colour);
 }

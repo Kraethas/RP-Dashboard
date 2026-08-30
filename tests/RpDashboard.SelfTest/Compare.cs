@@ -49,12 +49,28 @@ internal static class Compare
             return 1;
         }
 
-        List<string> mine = Bodies(ours);
-        List<string> other = Bodies(theirs);
+        List<Entry> mineEntries = Bodies(ours);
+        List<Entry> otherEntries = Bodies(theirs);
 
-        Report("dashboard", mine);
-        Report("afterline", other);
+        Report("dashboard", mineEntries);
+        Report("afterline", otherEntries);
         Console.WriteLine();
+
+        // The first comparison run was misleading because the two files covered different
+        // windows: the dashboard was opened mid-session and closed while the game was still up.
+        // Printing both windows makes that obvious instead of leaving it to be discovered in the
+        // line counts.
+        Console.WriteLine("  Compare the windows before reading anything into the numbers.");
+        Console.WriteLine("  Lines outside the dashboard's window were never ours to catch.");
+        Console.WriteLine();
+
+        // Only Afterline lines inside our window can fairly be called missed.
+        string first = mineEntries.FirstOrDefault()?.Time ?? "00:00:00";
+        string last = mineEntries.LastOrDefault()?.Time ?? "23:59:59";
+        otherEntries = otherEntries.Where(e => Within(e.Time, first, last)).ToList();
+
+        List<string> mine = mineEntries.Select(e => e.Body).ToList();
+        List<string> other = otherEntries.Select(e => e.Body).ToList();
 
         // Compared as multisets: a line legitimately repeated in play ("* Ilya nods.") should
         // count as many times as it happened, not be collapsed into one.
@@ -107,15 +123,23 @@ internal static class Compare
     }
 
     /// <summary>
-    /// The message bodies, with the timestamp stripped.
-    ///
-    /// Timestamps are dropped on purpose: Afterline records the time the game printed a line,
-    /// while the dashboard records the time it read one, so they differ by up to a poll. The
-    /// text is what has to match.
+    /// True when a time of day falls in [from, to], allowing for a window that crosses midnight.
+    /// A session running past the game's midnight is the ordinary case, not the exception.
     /// </summary>
-    private static List<string> Bodies(string path)
+    private static bool Within(string time, string from, string to)
+        => string.CompareOrdinal(from, to) <= 0
+            ? string.CompareOrdinal(time, from) >= 0 && string.CompareOrdinal(time, to) <= 0
+            : string.CompareOrdinal(time, from) >= 0 || string.CompareOrdinal(time, to) <= 0;
+
+    private sealed record Entry(string Time, string Body);
+
+    /// <summary>
+    /// Each line as (time, body). Both logs now stamp on the game's clock, so the times line up
+    /// and are what bounds the comparison window; the body is what has to match.
+    /// </summary>
+    private static List<Entry> Bodies(string path)
     {
-        var bodies = new List<string>();
+        var bodies = new List<Entry>();
 
         foreach (string raw in File.ReadLines(path))
         {
@@ -125,10 +149,14 @@ internal static class Compare
             if (line.StartsWith("====", StringComparison.Ordinal)) continue;
 
             // "[HH:MM:SS] body"
+            string time = "";
             if (line.Length > 11 && line[0] == '[' && line[9] == ']')
+            {
+                time = line[1..9];
                 line = line[10..].Trim();
+            }
 
-            if (line.Length > 0) bodies.Add(line);
+            if (line.Length > 0) bodies.Add(new Entry(time, line));
         }
 
         return bodies;
@@ -141,14 +169,16 @@ internal static class Compare
         return counts;
     }
 
-    private static void Report(string label, List<string> lines)
+    private static void Report(string label, List<Entry> entries)
     {
+        List<string> lines = entries.Select(e => e.Body).ToList();
         int distinct = lines.Distinct(StringComparer.Ordinal).Count();
         int duplicates = lines.Count - distinct;
         double share = lines.Count == 0 ? 0 : 100.0 * duplicates / lines.Count;
+        string window = entries.Count == 0 ? "-" : $"{entries[0].Time}..{entries[^1].Time}";
 
         Console.WriteLine($"  {label,-10} {lines.Count,7} lines  {distinct,7} distinct  " +
-                          $"{duplicates,7} duplicates ({share:F1}%)");
+                          $"{duplicates,7} duplicates ({share,5:F1}%)  window {window}");
     }
 
     private static void Show(string label, List<string> lines)

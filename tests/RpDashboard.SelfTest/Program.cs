@@ -103,11 +103,23 @@ public static class Program
             "<li><span>Nikos says: that&#39;s him &amp; his brother</span></li>",
             "Nikos says: that's him & his brother");
 
-        // A tag boundary has to read as a word boundary, or two spans meeting mid-callsign
-        // silently join into something that no longer matches what the user typed.
-        CheckText("a tag boundary separates words",
+        // Adjacent spans render with nothing between them, so nothing goes between them here.
+        // The opposite rule — a space at every tag boundary — was tried, and comparing a real
+        // session against Afterline showed exactly what it cost: "[ CHAT ]", "un- realized",
+        // "selfie , old man". Every difference between the two logs, and not one of them real.
+        CheckText("adjacent spans are not separated",
             "<li><span>FD</span><span>-1</span></li>",
-            "FD -1");
+            "FD-1");
+
+        CheckText("a line break is whitespace",
+            "<li><span>one</span><br><span>two</span></li>",
+            "one two");
+
+        CheckText("a self-closed break too",
+            "<li>one<br />two</li>", "one two");
+
+        CheckText("a tag merely starting br is not a break",
+            "<li><brand>one</brand>two</li>", "onetwo");
 
         CheckText("whitespace collapses",
             "<li>  dispatch\n\n   to   all   units  </li>",
@@ -239,6 +251,51 @@ public static class Program
         }
 
         TimerThreadTest();
+        GameClockTests();
+    }
+
+    /// <summary>
+    /// The log is kept on the game's clock, not this machine's.
+    ///
+    /// GTA World stamps with the server's time — three hours off this machine when measured —
+    /// and every other player's log is on that clock. A log that cannot be lined up against
+    /// someone else's is worth much less if it is ever needed.
+    ///
+    /// The first version named files by the local date while writing the game's timestamps
+    /// inside them, so one session was filed under a single day here while Afterline split it
+    /// across two. LogPusher takes a session's date from the filename and its times from the
+    /// body, so those two disagreeing is exactly the kind of quiet mismatch that has already
+    /// cost this project twice.
+    /// </summary>
+    private static void GameClockTests()
+    {
+        var clock = new GameClock();
+
+        // The measured case: read at 00:50 local, stamped 21:50 by the game. That is the
+        // previous game day, not this one.
+        DateTime read = new(2026, 8, 30, 0, 50, 5);
+        DateTime game = clock.TimeOf("[21:50:05] (( PM to Luna : ooooh ))", read);
+
+        Check("a stamp three hours behind resolves to the previous game day",
+            game == new DateTime(2026, 8, 29, 21, 50, 5));
+
+        Check("and the offset is learned", clock.OffsetKnown && clock.Offset == TimeSpan.FromHours(-3));
+
+        // Later the same run, past the game's midnight.
+        DateTime later = clock.TimeOf("[01:10:44] Vehicle parked.", new DateTime(2026, 8, 30, 4, 10, 44));
+        Check("after the game's midnight it moves to the next game day",
+            later == new DateTime(2026, 8, 30, 1, 10, 44));
+
+        // Unstamped lines carry the offset forward rather than falling back to local time.
+        DateTime unstamped = clock.TimeOf("no stamp here", new DateTime(2026, 8, 30, 4, 20, 0));
+        Check("an unstamped line is dated on the game's clock too",
+            unstamped == new DateTime(2026, 8, 30, 1, 20, 0));
+
+        // The offset runs the other way for a server ahead of local time.
+        var ahead = new GameClock();
+        DateTime aheadGame = ahead.TimeOf("[00:30:00] x", new DateTime(2026, 8, 29, 23, 30, 0));
+        Check("a server ahead of local time resolves to the next game day",
+            aheadGame == new DateTime(2026, 8, 30, 0, 30, 0));
     }
 
     /// <summary>

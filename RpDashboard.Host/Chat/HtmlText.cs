@@ -22,6 +22,7 @@ internal static class HtmlText
         if (string.IsNullOrEmpty(html)) return string.Empty;
 
         var text = new StringBuilder(html.Length);
+        var tag = new StringBuilder(16);
         bool inTag = false;
 
         foreach (char c in html)
@@ -29,16 +30,27 @@ internal static class HtmlText
             if (c == '<')
             {
                 inTag = true;
-                // A tag boundary is a word boundary: "<span>FD</span><span>-1</span>" must not
-                // become "FD-1" by accident in one place and "FD -1" in another. A space here,
-                // collapsed below, keeps that consistent.
-                text.Append(' ');
+                tag.Clear();
             }
             else if (c == '>')
             {
                 inTag = false;
+
+                // A line break is the one tag that means whitespace. Everything else is
+                // presentation: the HUD renders adjacent spans with nothing between them, so
+                // inserting anything here puts a space where the player saw none.
+                //
+                // An earlier version added a space at every tag boundary, on the theory that a
+                // callsign split across two spans would otherwise run together. Comparing a real
+                // session against Afterline showed what it actually did: "[ CHAT ]", "un- realized",
+                // "selfie , old man" — every difference between the two logs, and none of them real.
+                if (IsBreak(tag)) text.Append(' ');
             }
-            else if (!inTag)
+            else if (inTag)
+            {
+                tag.Append(c);
+            }
+            else
             {
                 text.Append(c);
             }
@@ -49,6 +61,25 @@ internal static class HtmlText
         string decoded = WebUtility.HtmlDecode(text.ToString());
 
         return CollapseWhitespace(decoded);
+    }
+
+    /// <summary>&lt;br&gt;, &lt;br/&gt; and &lt;br /&gt;, however they are spelled.</summary>
+    private static bool IsBreak(StringBuilder tag)
+    {
+        int i = 0;
+        while (i < tag.Length && char.IsWhiteSpace(tag[i])) i++;
+
+        if (i + 1 >= tag.Length + 1) return false;
+        if (i >= tag.Length || char.ToLowerInvariant(tag[i]) != 'b') return false;
+        if (i + 1 >= tag.Length || char.ToLowerInvariant(tag[i + 1]) != 'r') return false;
+
+        // "br", "br/", "br /" — but not "brand" or anything else starting br.
+        for (int j = i + 2; j < tag.Length; j++)
+        {
+            if (!char.IsWhiteSpace(tag[j]) && tag[j] != '/') return false;
+        }
+
+        return true;
     }
 
     private static string CollapseWhitespace(string value)
