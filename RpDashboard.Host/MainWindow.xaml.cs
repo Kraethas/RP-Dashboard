@@ -41,6 +41,7 @@ public partial class MainWindow : Window
     private readonly Dictionary<ToolHost, TabItem> _tabs = new();
 
     private System.Windows.Forms.NotifyIcon? _trayIcon;
+    private bool _settingStartup;
     private PluginScanResult _scan = new(Array.Empty<LoadedTool>(), Array.Empty<PluginProblem>());
 
     public MainWindow()
@@ -81,6 +82,8 @@ public partial class MainWindow : Window
         SetUpTrayIcon();
         LoadTools();
         ShowConnectionStatus(_chat.Status);
+
+        SetUpStartupToggle();
 
         HostSettings settings = _hostSettings.Load(new HostSettings());
         ChatLogBox.IsChecked = settings.ChatLogEnabled;
@@ -312,6 +315,49 @@ public partial class MainWindow : Window
         => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "RpDashboard", "ChatLogs");
+
+    /// <summary>
+    /// Reflects the Run key rather than a setting of ours, because the registry is the truth:
+    /// the entry can be removed from Task Manager's Startup tab without this app being involved,
+    /// and a checkbox that disagreed with that would be worse than none.
+    /// </summary>
+    private void SetUpStartupToggle()
+    {
+        _settingStartup = true;
+        StartupBox.IsChecked = StartupRegistration.IsEnabled;
+        _settingStartup = false;
+
+        // The app was moved or replaced since it was registered, so the entry points at
+        // something that may not be there. Quietly repoint it at whatever is running now.
+        if (StartupRegistration.IsEnabled && StartupRegistration.IsStale)
+        {
+            StartupRegistration.Enable();
+            ToolStatusText.Text = "Start with Windows now points at this copy of the dashboard.";
+        }
+    }
+
+    private void OnStartupChanged(object sender, RoutedEventArgs e)
+    {
+        // Setting IsChecked in code raises this too, and re-writing the registry from inside the
+        // handler that is only reflecting it would be a small loop of pointless writes.
+        if (_settingStartup) return;
+
+        bool wanted = StartupBox.IsChecked == true;
+        bool ok = wanted ? StartupRegistration.Enable() : StartupRegistration.Disable();
+
+        if (!ok)
+        {
+            ToolStatusText.Text = "Windows wouldn't let that be changed.";
+            _settingStartup = true;
+            StartupBox.IsChecked = StartupRegistration.IsEnabled;
+            _settingStartup = false;
+            return;
+        }
+
+        ToolStatusText.Text = wanted
+            ? "The dashboard will start with Windows, in the tray."
+            : "The dashboard will no longer start with Windows.";
+    }
 
     private void OnChatLogChanged(object sender, RoutedEventArgs e)
     {

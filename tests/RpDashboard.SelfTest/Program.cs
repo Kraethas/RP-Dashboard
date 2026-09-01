@@ -3,6 +3,7 @@ using System.Windows.Threading;
 using RpDashboard.Contracts;
 using RpDashboard.Host.Chat;
 using RpDashboard.Host.Hosting;
+using RpDashboard.Host.Services;
 
 namespace RpDashboard.SelfTest;
 
@@ -44,6 +45,9 @@ public static class Program
 
         Section("chat log writing");
         ChatLogTests();
+
+        Section("start with Windows");
+        StartupTests();
 
         Section("plugin loading");
         PluginTests();
@@ -251,6 +255,12 @@ public static class Program
             string metaText = meta is null ? "" : File.ReadAllText(meta);
             Check("the sidecar records the colour", metaText.Contains("#28b4bf"));
             Check("the sidecar records the sequence", metaText.Contains("\"Seq\":2"));
+
+            // Afterline's sidecar keeps colour as per-character runs. Keeping the markup keeps
+            // that and everything else it was derived from, so switching Afterline off loses no
+            // information rather than losing whatever nobody had thought to extract yet.
+            Check("the sidecar archives the original markup",
+                metaText.Contains("\"Html\":") && metaText.Contains("<span"));
         }
         finally
         {
@@ -403,6 +413,59 @@ public static class Program
         _checks++;
         Console.WriteLine(ok ? $"  ok   {name}" : $"  FAIL {name}");
         if (!ok) _failures++;
+    }
+
+    /// <summary>
+    /// Exercises the real per-user Run key, then puts it back exactly as it was.
+    ///
+    /// Worth doing against the real registry rather than a fake: the things that go wrong here
+    /// are quoting a path that contains spaces, and leaving a stale entry behind on disable.
+    /// Neither shows up against a stub.
+    /// </summary>
+    private static void StartupTests()
+    {
+        string? before = StartupRegistration.RegisteredCommand;
+
+        try
+        {
+            StartupRegistration.Disable();
+            Check("starts from a known-clean state", !StartupRegistration.IsEnabled);
+
+            Check("enabling reports success", StartupRegistration.Enable());
+            Check("and the entry is there", StartupRegistration.IsEnabled);
+
+            string command = StartupRegistration.RegisteredCommand ?? "";
+
+            // The dashboard lives under "000 - Claude Code stuff", so an unquoted path would be
+            // read by Windows as a command plus arguments and silently fail to launch.
+            Check("the executable path is quoted", command.StartsWith("\"", StringComparison.Ordinal));
+
+            Check("it starts to the tray",
+                command.EndsWith(StartupRegistration.TrayArgument, StringComparison.Ordinal));
+
+            Check("it points at this executable",
+                Environment.ProcessPath is null || command.Contains(Environment.ProcessPath!, StringComparison.OrdinalIgnoreCase));
+
+            Check("enabling twice is not an error", StartupRegistration.Enable());
+
+            Check("disabling reports success", StartupRegistration.Disable());
+            Check("and the entry is gone", !StartupRegistration.IsEnabled);
+            Check("disabling twice is not an error", StartupRegistration.Disable());
+        }
+        finally
+        {
+            // Put the machine back the way it was found, whatever happened above.
+            if (before is not null)
+            {
+                using Microsoft.Win32.RegistryKey key = Microsoft.Win32.Registry.CurrentUser
+                    .CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true);
+                key.SetValue("RP Dashboard", before, Microsoft.Win32.RegistryValueKind.String);
+            }
+            else
+            {
+                StartupRegistration.Disable();
+            }
+        }
     }
 
     private static void PluginTests()

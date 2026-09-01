@@ -33,7 +33,18 @@ public partial class App : Application
 
         var window = new MainWindow();
         MainWindow = window;
+
+        // Shown first, always. The window has no handle until it is, and the hotkey service
+        // registers against that handle — start hidden and Street Medic's chords never bind.
         window.Show();
+
+        // Started by Windows at login rather than by hand: straight to the tray. The point of
+        // starting automatically is that the chat log is running, not that a window appears over
+        // whatever you were doing.
+        if (e.Args.Contains(Services.StartupRegistration.TrayArgument, StringComparer.OrdinalIgnoreCase))
+        {
+            window.Hide();
+        }
     }
 
     /// <summary>

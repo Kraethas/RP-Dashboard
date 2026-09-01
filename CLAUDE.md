@@ -90,9 +90,13 @@ the filename must use `CultureInfo.InvariantCulture` (an English regex reads tha
 a non-English machine), and the file must be written **without a BOM**, because LogPusher opens
 it as `utf-8` rather than `utf-8-sig`.
 
-A sidecar `.lines.jsonl` carries the sequence number and the colour each line was drawn in —
-what the text format cannot hold, and the raw material for the constants Street Medic still
-lacks. Afterline captures colour too, into a `.colors.jsonl` nothing ever reads.
+A sidecar `.lines.jsonl` carries what the text format cannot: the sequence number, both clocks,
+the colour, and the original `<li>` markup. Afterline's equivalent records colour as
+per-character runs — about 8% of lines have more than one — and nothing ever reads it. Keeping
+the markup keeps those runs and anything else anyone later wants out of them, since it is what
+they were derived from, so **turning Afterline off costs no information**. It roughly doubles
+the sidecar, which is still well under Afterline's, because every line appears once here and
+about four times there.
 
 ### Three things that bit on the way in
 
@@ -113,6 +117,26 @@ All in `ChatLogWriter`, all shipped once and all now covered by the self-test:
 `%LOCALAPPDATA%\RpDashboard\crash.log` now records anything unhandled, on any thread. The first
 of those bugs was only diagnosable through Event Viewer, which is no use for an app that lives
 in the tray.
+
+### Start with Windows
+
+`Services/StartupRegistration.cs`, toggled from the status bar. Writes the per-user Run key —
+`HKCU\...\CurrentVersion\Run`, the same mechanism Afterline uses — with the exe path quoted
+and `--tray` appended, so logging in starts the log rather than a window.
+
+This is not a convenience. FiveM never writes chat to disk, so the log only covers the time the
+dashboard is open, and three days of comparison showed that is the *only* thing it ever loses:
+every line Afterline had that we did not came from a stretch when the dashboard was closed. The
+toggle is what makes turning Afterline off safe.
+
+The checkbox reflects the registry rather than a setting of ours, because the entry can be
+removed from Task Manager's Startup tab without this app being involved. If the entry exists but
+points somewhere else — the app was moved or replaced — it is quietly repointed at whatever is
+running now.
+
+`--tray` shows the window and then hides it, rather than starting hidden. The window has no
+handle until it is shown, and `HotkeyService` registers against that handle; start hidden and
+Street Medic's chords silently never bind.
 
 ### The clock is the game's, not this machine's
 

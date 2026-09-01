@@ -26,9 +26,10 @@ namespace RpDashboard.Host.Chat;
 /// change to LogPusher at all. That is what makes it possible to run both for a while and
 /// compare, rather than switching on faith.
 ///
-/// A sidecar `.lines.jsonl` carries what the text format cannot: the sequence number and the
-/// colour GTAW drew each line in. Afterline captures colour too and nothing ever reads it; here
-/// it is the raw material for the constants Street Medic is still missing.
+/// A sidecar `.lines.jsonl` carries what the text format cannot: the sequence number, the game
+/// and local clocks, the colour, and the original markup. Afterline's equivalent keeps colour as
+/// per-character runs and nothing ever reads it; keeping the markup keeps that and anything else
+/// anyone later wants out of it, so turning Afterline off costs no information at all.
 /// </summary>
 internal sealed class ChatLogWriter : IDisposable
 {
@@ -61,6 +62,16 @@ internal sealed class ChatLogWriter : IDisposable
     /// line — invisible, and enough to stop that line matching anything.
     /// </summary>
     private static readonly Encoding FileEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+
+    /// <summary>
+    /// Relaxed escaping, because the default encoder turns every "&lt;" into "<" — six
+    /// bytes for one character, in a field that is nothing but markup, and unreadable to anyone
+    /// opening the file. Safe here: this is a local log, never embedded in a web page.
+    /// </summary>
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
 
     private readonly IChatFeed _feed;
     private readonly Dispatcher _dispatcher;
@@ -256,7 +267,8 @@ internal sealed class ChatLogWriter : IDisposable
                 gameTime.ToString("o"),
                 line.SeenAt.ToString("o"),
                 line.Text,
-                ChatColour.Of(line.RawHtml))));
+                ChatColour.Of(line.RawHtml),
+                line.RawHtml), JsonOptions));
         }
 
         File.AppendAllText(path, text.ToString(), FileEncoding);
@@ -292,6 +304,20 @@ internal sealed class ChatLogWriter : IDisposable
     /// When the dashboard read the line, on this machine's clock. Kept only so the offset
     /// between the two is recoverable after the fact; nothing should prefer it.
     /// </param>
+    /// <param name="Colour">
+    /// The first inner span's colour — the one that says what kind of line this is.
+    /// </param>
+    /// <param name="Html">
+    /// The message exactly as the HUD rendered it.
+    ///
+    /// Afterline's sidecar records colour as per-character runs, and about 8% of lines carry
+    /// more than one. Storing the markup keeps all of that and everything else besides, since it
+    /// is what the runs were derived from in the first place — so switching Afterline off loses
+    /// nothing rather than losing the parts nobody had thought to extract yet.
+    ///
+    /// It roughly doubles the sidecar. That is still well under Afterline's, because every line
+    /// appears once here and four times there.
+    /// </param>
     private sealed record LogRecord(
-        long Seq, string Time, string GameTime, string ReadAt, string Text, string? Colour);
+        long Seq, string Time, string GameTime, string ReadAt, string Text, string? Colour, string Html);
 }
