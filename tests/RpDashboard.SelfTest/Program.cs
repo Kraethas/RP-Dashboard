@@ -213,6 +213,13 @@ public static class Program
                 : $"  FAIL filename was {(text is null ? "(none)" : Path.GetFileName(text))}");
             if (!named) _failures++;
 
+            // Afterline zero-pads the day. Three days of testing all landed on two-digit dates,
+            // so an unpadded "d" looked right until 1 September produced "[1-September-2026]"
+            // and nothing could pair it with Afterline's "[01-September-2026]".
+            Check("single-digit days are zero-padded, as Afterline pads them",
+                ChatLogWriter.FileNameFor(new DateTime(2026, 9, 1))
+                    == "Chatlog [GTAWorld Roleplay English] [01-September-2026].txt");
+
             string[] lines = text is null ? Array.Empty<string>() : File.ReadAllLines(text);
 
             Check("the server header is written first",

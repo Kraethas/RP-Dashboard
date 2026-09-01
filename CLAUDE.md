@@ -151,6 +151,28 @@ peak observed chat is 24 lines/sec against a 240/sec read — and `ChatFeed.GapS
 when a poll finds no overlap at all with the previous one, which is the case where lines went by
 unseen. The status bar says so rather than swallowing it.
 
+### What the comparison has shown so far
+
+Three days, and **not one line missed while the dashboard was writing**:
+
+| day | our coverage | Afterline lines in those spans | missed |
+|---|---|---|---|
+| 30 August | 9 min over 5 spans | 15 | 0 |
+| 31 August | 23 min over 8 spans | 599 | 0 |
+| 1 September | 20 min, one span | 152 | 0 |
+
+1 September is the cleanest case: the dashboard was open for the whole session, and the two
+logs are equivalent — 152 lines, 149 distinct, the same 3 genuine repeats on both sides.
+
+31 August is the instructive one. Read naively it says 394 lines missed; every one of them
+arrived between 22:05 and 23:45 while the dashboard was closed. **Coverage, not capture.** That
+is why `--compare` reports the spans the dashboard was actually writing and only counts misses
+inside them — first-line-to-last-line is not a coverage window, and treating it as one turns a
+perfect day into an alarming one.
+
+So the reader is not the risk. The risk is entirely whether the dashboard is open, which no
+comparison can measure.
+
 Switch Afterline off once several days compare clean, not before.
 
 ## Invariants — do not break these

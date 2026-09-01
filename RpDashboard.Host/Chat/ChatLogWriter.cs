@@ -265,11 +265,18 @@ internal sealed class ChatLogWriter : IDisposable
         CurrentFile = path;
     }
 
+    /// <summary>The file a given game-day is written to. Exposed so the self-test can pin it.</summary>
+    internal static string FileNameFor(DateTime day) => FileName(day);
+
     private static string FileName(DateTime day)
-        // "29-August-2026", the shape LogPusher's FILENAME_DATE_RE looks for. Invariant culture
-        // on purpose: the month name is matched by an English regex, and this machine is not
-        // running an English locale.
-        => string.Format(FileNameFormat, day.ToString("d-MMMM-yyyy",
+        // "01-September-2026". Zero-padded, because Afterline pads and the whole point of this
+        // format is to be indistinguishable from theirs — the first three days of testing all
+        // fell on two-digit dates, so an unpadded "d" looked correct right up until 1 September
+        // produced a name no comparison could pair with Afterline's.
+        //
+        // Invariant culture on purpose too: the month name is matched by an English regex, and
+        // this machine is not running an English locale.
+        => string.Format(FileNameFormat, day.ToString("dd-MMMM-yyyy",
             System.Globalization.CultureInfo.InvariantCulture));
 
     public void Dispose()

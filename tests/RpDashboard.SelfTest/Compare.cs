@@ -22,14 +22,39 @@ internal static class Compare
 
     public static int Run(string? day)
     {
-        day ??= DateTime.Today.ToString("d-MMMM-yyyy", System.Globalization.CultureInfo.InvariantCulture);
-        string name = $"Chatlog [GTAWorld Roleplay English] [{day}].txt";
+        var invariant = System.Globalization.CultureInfo.InvariantCulture;
+        day ??= DateTime.Today.ToString("dd-MMMM-yyyy", invariant);
 
-        string ours = Path.Combine(
+
+        // Matched on the date rather than the exact filename. Afterline zero-pads the day and
+        // the dashboard did not until 1 September made the difference visible, so files written
+        // either way still have to pair up.
+        var names = new List<string>();
+        if (DateTime.TryParse(day.Replace('-', ' '), invariant,
+                System.Globalization.DateTimeStyles.None, out DateTime parsed))
+        {
+            // ToString with the culture spelled out, not interpolation: interpolation formats
+            // with the *current* culture, and on this machine that renders September as
+            // "Σεπτεμβρίου" — a filename nothing on disk will ever match. Same trap the writer
+            // guards against when it names the file in the first place.
+            names.Add("Chatlog [GTAWorld Roleplay English] [" +
+                      parsed.ToString("dd-MMMM-yyyy", invariant) + "].txt");
+            names.Add("Chatlog [GTAWorld Roleplay English] [" +
+                      parsed.ToString("d-MMMM-yyyy", invariant) + "].txt");
+        }
+        else
+        {
+            names.Add($"Chatlog [GTAWorld Roleplay English] [{day}].txt");
+        }
+
+        string logs = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "RpDashboard", "ChatLogs", name);
+            "RpDashboard", "ChatLogs");
 
-        string? theirs = FindAfterline(name);
+        string ours = names.Select(n => Path.Combine(logs, n)).FirstOrDefault(File.Exists)
+                      ?? Path.Combine(logs, names[0]);
+
+        string? theirs = names.Select(FindAfterline).FirstOrDefault(found => found is not null);
 
         Console.WriteLine($"day     {day}");
         Console.WriteLine($"ours    {ours}");
@@ -56,18 +81,27 @@ internal static class Compare
         Report("afterline", otherEntries);
         Console.WriteLine();
 
-        // The first comparison run was misleading because the two files covered different
-        // windows: the dashboard was opened mid-session and closed while the game was still up.
-        // Printing both windows makes that obvious instead of leaving it to be discovered in the
-        // line counts.
-        Console.WriteLine("  Compare the windows before reading anything into the numbers.");
-        Console.WriteLine("  Lines outside the dashboard's window were never ours to catch.");
+        // Only Afterline lines from while the dashboard was actually writing can fairly be
+        // called missed.
+        //
+        // First-line-to-last-line is not that window, and reading it as such is badly
+        // misleading: on 31 August the dashboard ran in eight short bursts totalling 23 minutes,
+        // spread from 08:39 to 23:59. Treating that as one span said 394 lines were missed. The
+        // truth was zero — every one of those 394 arrived while the dashboard was closed.
+        List<(int From, int To)> spans = WritingSpans(mineEntries);
+
+        Console.WriteLine("  the dashboard was writing during:");
+        foreach ((int from, int to) in spans)
+            Console.WriteLine($"     {Clock(from)}..{Clock(to)}  ({(to - from) / 60} min)");
+
+        int covered = spans.Sum(s => s.To - s.From);
+        Console.WriteLine($"     {spans.Count} span(s), {covered / 60} minutes in total");
         Console.WriteLine();
 
-        // Only Afterline lines inside our window can fairly be called missed.
-        string first = mineEntries.FirstOrDefault()?.Time ?? "00:00:00";
-        string last = mineEntries.LastOrDefault()?.Time ?? "23:59:59";
-        otherEntries = otherEntries.Where(e => Within(e.Time, first, last)).ToList();
+        otherEntries = otherEntries.Where(e => InAnySpan(Seconds(e.Time), spans)).ToList();
+        Console.WriteLine($"  Afterline wrote {otherEntries.Count} line(s) during those spans.");
+        Console.WriteLine("  Anything outside them was never ours to catch.");
+        Console.WriteLine();
 
         List<string> mine = mineEntries.Select(e => e.Body).ToList();
         List<string> other = otherEntries.Select(e => e.Body).ToList();
@@ -100,9 +134,10 @@ internal static class Compare
             return 0;
         }
 
-        Console.WriteLine("Some lines were only seen by Afterline. Before switching, work out why:");
-        Console.WriteLine("  - was the dashboard closed, or the chat log switched off, for part of the day?");
+        Console.WriteLine("Some lines were only seen by Afterline while the dashboard was writing.");
+        Console.WriteLine("That is the case that matters, so work out which it was:");
         Console.WriteLine("  - did the status bar report chat arriving faster than it could be read?");
+        Console.WriteLine("  - did the dashboard restart inside one of those spans?");
         return 1;
     }
 
@@ -122,14 +157,48 @@ internal static class Compare
         }
     }
 
+    /// <summary>How long a silence ends one writing span and starts the next.</summary>
+    private const int SpanGapSeconds = 300;
+
     /// <summary>
-    /// True when a time of day falls in [from, to], allowing for a window that crosses midnight.
-    /// A session running past the game's midnight is the ordinary case, not the exception.
+    /// The stretches the dashboard was actually writing, rather than the gap between its first
+    /// line and its last. A dashboard opened for ten minutes at breakfast and ten at midnight
+    /// covered twenty minutes, not sixteen hours.
     /// </summary>
-    private static bool Within(string time, string from, string to)
-        => string.CompareOrdinal(from, to) <= 0
-            ? string.CompareOrdinal(time, from) >= 0 && string.CompareOrdinal(time, to) <= 0
-            : string.CompareOrdinal(time, from) >= 0 || string.CompareOrdinal(time, to) <= 0;
+    private static List<(int From, int To)> WritingSpans(List<Entry> entries)
+    {
+        var spans = new List<(int, int)>();
+        List<int> times = entries.Select(e => Seconds(e.Time)).Where(t => t >= 0).Distinct().Order().ToList();
+
+        if (times.Count == 0) return spans;
+
+        int start = times[0], last = times[0];
+
+        foreach (int time in times.Skip(1))
+        {
+            if (time - last > SpanGapSeconds)
+            {
+                spans.Add((start, last));
+                start = time;
+            }
+
+            last = time;
+        }
+
+        spans.Add((start, last));
+        return spans;
+    }
+
+    private static bool InAnySpan(int time, List<(int From, int To)> spans)
+        => time >= 0 && spans.Any(span => time >= span.From && time <= span.To);
+
+    private static int Seconds(string time)
+        => time.Length == 8 && int.TryParse(time[..2], out int h) &&
+           int.TryParse(time[3..5], out int m) && int.TryParse(time[6..], out int s)
+            ? h * 3600 + m * 60 + s
+            : -1;
+
+    private static string Clock(int seconds) => $"{seconds / 3600:00}:{seconds % 3600 / 60:00}";
 
     private sealed record Entry(string Time, string Body);
 
