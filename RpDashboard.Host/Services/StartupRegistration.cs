@@ -21,7 +21,19 @@ internal static class StartupRegistration
     private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
 
     /// <summary>The name the entry appears under in Task Manager's Startup tab.</summary>
-    private const string ValueName = "RP Dashboard";
+    public const string ValueName = "RP Dashboard";
+
+    /// <summary>
+    /// The value this instance reads and writes. Overridable so the self-test can exercise the
+    /// real registry without touching the real entry.
+    ///
+    /// It used to test against "RP Dashboard" itself, saving and restoring the value around the
+    /// run. That is not good enough for something a user has switched on: the test is the only
+    /// thing besides the user that ever deletes that value, and a run that ends unexpectedly —
+    /// or simply a restore that does not happen — silently turns off a setting whose whole
+    /// purpose is to be running when nobody is watching.
+    /// </summary>
+    internal static string Name { get; set; } = ValueName;
 
     /// <summary>
     /// Started by Windows rather than by hand, so it goes straight to the tray. Being logged in
@@ -52,7 +64,7 @@ internal static class StartupRegistration
         try
         {
             using RegistryKey key = Registry.CurrentUser.CreateSubKey(RunKey, writable: true);
-            key.SetValue(ValueName, Command(), RegistryValueKind.String);
+            key.SetValue(Name, Command(), RegistryValueKind.String);
             return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
@@ -66,7 +78,7 @@ internal static class StartupRegistration
         try
         {
             using RegistryKey? key = Registry.CurrentUser.OpenSubKey(RunKey, writable: true);
-            key?.DeleteValue(ValueName, throwOnMissingValue: false);
+            key?.DeleteValue(Name, throwOnMissingValue: false);
             return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
@@ -80,7 +92,7 @@ internal static class StartupRegistration
         try
         {
             using RegistryKey? key = Registry.CurrentUser.OpenSubKey(RunKey);
-            return key?.GetValue(ValueName) as string;
+            return key?.GetValue(Name) as string;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {

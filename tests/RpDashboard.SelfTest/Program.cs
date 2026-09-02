@@ -416,15 +416,21 @@ public static class Program
     }
 
     /// <summary>
-    /// Exercises the real per-user Run key, then puts it back exactly as it was.
+    /// Exercises the real per-user Run key, under a name of its own.
     ///
-    /// Worth doing against the real registry rather than a fake: the things that go wrong here
-    /// are quoting a path that contains spaces, and leaving a stale entry behind on disable.
-    /// Neither shows up against a stub.
+    /// Against the real registry, because the two things that go wrong here are quoting a path
+    /// that contains spaces and leaving a stale entry behind on disable, and neither shows up
+    /// against a stub. But never against the real value: this test used to save and restore
+    /// "RP Dashboard" around itself, which meant every run briefly switched off a setting whose
+    /// entire purpose is to be on when nobody is watching — and left it off for good if the
+    /// restore ever failed to happen.
     /// </summary>
     private static void StartupTests()
     {
-        string? before = StartupRegistration.RegisteredCommand;
+        const string testName = "RP Dashboard (self-test)";
+        string? realBefore = StartupRegistration.RegisteredCommand;
+
+        StartupRegistration.Name = testName;
 
         try
         {
@@ -454,18 +460,12 @@ public static class Program
         }
         finally
         {
-            // Put the machine back the way it was found, whatever happened above.
-            if (before is not null)
-            {
-                using Microsoft.Win32.RegistryKey key = Microsoft.Win32.Registry.CurrentUser
-                    .CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true);
-                key.SetValue("RP Dashboard", before, Microsoft.Win32.RegistryValueKind.String);
-            }
-            else
-            {
-                StartupRegistration.Disable();
-            }
+            StartupRegistration.Disable();          // clear the test's own entry
+            StartupRegistration.Name = StartupRegistration.ValueName;
         }
+
+        Check("the real setting was never touched",
+            StartupRegistration.RegisteredCommand == realBefore);
     }
 
     private static void PluginTests()

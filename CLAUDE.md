@@ -129,8 +129,15 @@ dashboard is open, and three days of comparison showed that is the *only* thing 
 every line Afterline had that we did not came from a stretch when the dashboard was closed. The
 toggle is what makes turning Afterline off safe.
 
+The self-test exercises this against the real registry — quoting a path with spaces and leaving
+a stale entry on disable are the two things that go wrong, and neither shows up against a stub —
+but under a value name of its own. It originally tested against `RP Dashboard` itself, saving
+and restoring around the run, which briefly switched off a setting whose entire purpose is to be
+on when nobody is watching, and left it off for good if the restore ever failed to happen.
+
 The checkbox reflects the registry rather than a setting of ours, because the entry can be
-removed from Task Manager's Startup tab without this app being involved. If the entry exists but
+removed from Task Manager's Startup tab without this app being involved. It is read once at
+startup, so a change made behind the app's back shows up on next launch, not immediately. If the entry exists but
 points somewhere else — the app was moved or replaced — it is quietly repointed at whatever is
 running now.
 
