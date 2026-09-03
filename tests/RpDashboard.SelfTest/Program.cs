@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Windows.Threading;
 using RpDashboard.Contracts;
 using RpDashboard.Host.Chat;
@@ -48,6 +48,9 @@ public static class Program
 
         Section("start with Windows");
         StartupTests();
+
+        Section("one instance at a time");
+        SingleInstanceTests();
 
         Section("plugin loading");
         PluginTests();
@@ -466,6 +469,34 @@ public static class Program
 
         Check("the real setting was never touched",
             StartupRegistration.RegisteredCommand == realBefore);
+    }
+
+    private static void SingleInstanceTests()
+    {
+        // A name of its own, because the real dashboard is very likely running while this test
+        // does, and signalling it would pop its window up in the middle of a test run.
+        const string name = "RpDashboard.SelfTest";
+
+        using var first = new SingleInstance(name);
+        using var requested = new ManualResetEventSlim();
+        first.ShowRequested += requested.Set;
+
+        Check("the first launch claims the instance", first.TryClaim());
+
+        using (var second = new SingleInstance(name))
+        {
+            Check("a second launch is refused", !second.TryClaim());
+            Check("and the first is asked to show itself", requested.Wait(TimeSpan.FromSeconds(5)));
+        }
+
+        requested.Reset();
+        Check("the first is still running after that", !new SingleInstance(name).TryClaim());
+        Check("(which asked it to show itself again)", requested.Wait(TimeSpan.FromSeconds(5)));
+
+        first.Dispose();
+
+        using var next = new SingleInstance(name);
+        Check("once the first exits, the next launch is first", next.TryClaim());
     }
 
     private static void PluginTests()

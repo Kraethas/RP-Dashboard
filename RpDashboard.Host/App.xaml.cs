@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Windows;
 using System.Windows.Threading;
 
@@ -6,9 +6,20 @@ namespace RpDashboard.Host;
 
 public partial class App : Application
 {
+    private readonly Services.SingleInstance _instance = new();
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        // Before anything else exists: a second dashboard would open a second socket into the
+        // game and a second writer onto the same chat log. The running one is asked to come
+        // forward instead, and this one leaves without ever having shown a window.
+        if (!_instance.TryClaim())
+        {
+            Shutdown();
+            return;
+        }
 
         // A crash on a background thread leaves nothing behind but an entry in Event Viewer,
         // which is no use to anyone. This app runs in the tray for hours with timers and a poll
@@ -34,6 +45,10 @@ public partial class App : Application
         var window = new MainWindow();
         MainWindow = window;
 
+        // Another launch, most likely a double-click on the shortcut while this one sits in the
+        // tray. The request arrives on a threadpool thread; the window is the UI thread's.
+        _instance.ShowRequested += () => window.Dispatcher.BeginInvoke(window.RestoreFromTray);
+
         // Shown first, always. The window has no handle until it is, and the hotkey service
         // registers against that handle — start hidden and Street Medic's chords never bind.
         window.Show();
@@ -45,6 +60,12 @@ public partial class App : Application
         {
             window.Hide();
         }
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        _instance.Dispose();
+        base.OnExit(e);
     }
 
     /// <summary>

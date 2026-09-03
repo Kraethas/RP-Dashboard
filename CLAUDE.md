@@ -145,6 +145,22 @@ running now.
 handle until it is shown, and `HotkeyService` registers against that handle; start hidden and
 Street Medic's chords silently never bind.
 
+### One instance
+
+`Services/SingleInstance.cs`. A second launch signals the running one to come forward and
+exits before it has a window. Two dashboards would be two sockets into the HUD and two writers
+on the same chat log — the exact duplication this app exists to remove — and the easy way to
+get there is the copy Windows started at login sitting invisibly in the tray while the user
+double-clicks the shortcut. The name is not tied to the exe path on purpose: a Debug build and
+the shipped package are still two dashboards over one game.
+
+A named mutex decides who is first; a named event is how the loser asks the winner to show
+itself, because a window hidden to the tray has nothing for `SetForegroundWindow` to act on.
+`RestoreFromTray` pulses `Topmost` after `Activate()`, since a second launch that was not
+started from the shell has no foreground right to hand over and `Activate()` alone just
+flashes the taskbar. The self-test uses a name of its own so it does not pop up the dashboard
+that is probably running while it runs.
+
 ### The clock is the game's, not this machine's
 
 GTA World stamps each line with the server's time. Measured here that is three hours behind

@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -463,11 +463,26 @@ public partial class MainWindow : Window
         return System.Drawing.SystemIcons.Application;
     }
 
-    private void RestoreFromTray()
+    /// <summary>
+    /// Also what a second launch of the app turns into: the app-level single-instance guard
+    /// hands off here rather than opening another window.
+    /// </summary>
+    internal void RestoreFromTray()
     {
         Show();
         WindowState = WindowState.Normal;
         Activate();
+
+        // Activate() is only honoured when this process holds the foreground right, and a
+        // second launch started from anything other than the shell cannot pass it on — Windows
+        // then flashes the taskbar button and leaves the window behind whatever is in front.
+        // A pulse through Topmost is honoured regardless. Skipped when a tool has genuinely
+        // pinned the window on top, so as not to unpin it.
+        if (!Topmost)
+        {
+            Topmost = true;
+            Topmost = false;
+        }
     }
 
     private void OnStateChanged(object? sender, EventArgs e)
