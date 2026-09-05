@@ -196,6 +196,99 @@ public partial class LogPusherView : UserControl
 
     private void OpenArchive_Click(object sender, RoutedEventArgs e) => OpenFolder(_install?.ArchiveDirectory);
 
+    /// <summary>
+    /// The raw chat logs LogPusher reads, as opposed to its own diagnostics under "Diagnostics".
+    /// The path lives in LogPusher's <c>state.json</c>, so it is only known once LogPusher has
+    /// completed a poll — before that there is nothing to point at.
+    /// </summary>
+    private void ChatLogs_Click(object sender, RoutedEventArgs e)
+    {
+        string? folder = _install?.SourceLogFolder;
+        if (string.IsNullOrWhiteSpace(folder))
+        {
+            SummaryText.Text = "The raw-log folder shows up here once LogPusher has run one poll. " +
+                               "Start it, then try again.";
+            return;
+        }
+
+        OpenFolder(folder);
+    }
+
+    /// <summary>
+    /// Summarize and push the backlog now. This is the on-demand half of auto-summarize being
+    /// off: the watcher archives all day for free, and this pays for the summaries in one go when
+    /// the player is done. Runs LogPusher once with --push-all and reports what it did.
+    /// </summary>
+    private async void Push_Click(object sender, RoutedEventArgs e)
+    {
+        if (_install is null || !_install.Exists)
+        {
+            SummaryText.Text = "Point at LogPusher.exe first.";
+            return;
+        }
+
+        PushButton.IsEnabled = false;
+        string previous = PushButton.Content as string ?? "Push logs";
+        PushButton.Content = "Pushing...";
+        SummaryText.Text = "Summarizing and pushing finished sessions. This can take a moment.";
+
+        // Note the result file's age before the run, so a stale line from a previous push is not
+        // mistaken for this one's if the exe dies before writing.
+        DateTime before = SafeWriteTime(_install.LastPushPath);
+
+        string resultText;
+        try
+        {
+            (int exitCode, string _) = await _install.RunOnceAsync("--push-all");
+
+            // Read the outcome from the file LogPusher wrote rather than its stdout: the exe is a
+            // windowed build and its console streams are not reliable.
+            string fromFile = ResultFileIfFresh(_install.LastPushPath, before);
+            resultText = fromFile.Length > 0
+                ? fromFile
+                : (exitCode == 0
+                    ? "Push finished."
+                    : $"Push failed (exit {exitCode}). See Diagnostics.");
+        }
+        catch (Exception ex)
+        {
+            resultText = $"Couldn't run the push: {ex.Message}";
+        }
+
+        PushButton.Content = previous;
+        PushButton.IsEnabled = true;
+
+        // Refresh first — it rewrites the state line and the decision list — then have the last
+        // word with what the push actually did, so the result isn't clobbered by the refresh.
+        _lastSeenWrite = null;
+        Refresh();
+        SummaryText.Text = resultText;
+    }
+
+    private static DateTime SafeWriteTime(string path)
+    {
+        try { return File.Exists(path) ? File.GetLastWriteTimeUtc(path) : DateTime.MinValue; }
+        catch (IOException) { return DateTime.MinValue; }
+    }
+
+    /// <summary>The result line LogPusher wrote, but only if it was written by this run.</summary>
+    private static string ResultFileIfFresh(string path, DateTime notNewerThan)
+    {
+        try
+        {
+            if (!File.Exists(path)) return string.Empty;
+            if (File.GetLastWriteTimeUtc(path) <= notNewerThan) return string.Empty;
+
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var reader = new StreamReader(stream);
+            return reader.ReadToEnd().Trim();
+        }
+        catch (IOException)
+        {
+            return string.Empty;
+        }
+    }
+
     private void OpenFolder(string? path)
     {
         if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))

@@ -5,7 +5,8 @@ using System.Text.Json;
 namespace LogPusherPanel;
 
 /// <summary>What LogPusher records about its own progress, out of <c>state.json</c>.</summary>
-public sealed record WatcherState(int Sessions, int Files, int ProblemFiles, DateTimeOffset? LastPoll);
+public sealed record WatcherState(
+    int Sessions, int Files, int ProblemFiles, DateTimeOffset? LastPoll, string? LogFolder);
 
 /// <summary>One line out of <c>logs/decisions.jsonl</c>.</summary>
 public sealed record Decision(
@@ -41,6 +42,9 @@ public sealed class LogPusherInstall
     public string StatePath => Path.Combine(Root, "state.json");
     public string LogsDirectory => Path.Combine(Root, "logs");
     public string ArchiveDirectory => Path.Combine(Root, "archive");
+
+    /// <summary>The one-line outcome of the last <c>--push-all</c>, written for the panel to read.</summary>
+    public string LastPushPath => Path.Combine(Root, "logs", "last_push.txt");
 
     public bool Exists => File.Exists(ExePath);
 
@@ -126,6 +130,44 @@ public sealed class LogPusherInstall
 
         return Process.Start(info) ?? throw new IOException("Windows didn't start LogPusher.");
     }
+
+    /// <summary>
+    /// Runs LogPusher once with the given argument and waits, capturing what it printed. Used for
+    /// <c>--push-all</c>: a headless one-shot, not the long-lived GUI. No window, because this is
+    /// a button in another app rather than a program the user is looking at.
+    /// </summary>
+    public async Task<(int ExitCode, string Output)> RunOnceAsync(string argument)
+    {
+        var info = new ProcessStartInfo
+        {
+            FileName = Path.GetFullPath(ExePath),
+            Arguments = argument,
+            WorkingDirectory = Root,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+
+        using Process process = Process.Start(info)
+            ?? throw new IOException("Windows didn't start LogPusher.");
+
+        // Read both streams before waiting: a full pipe buffer blocks the child, and the child not
+        // exiting then blocks us — the classic redirect deadlock.
+        Task<string> stdout = process.StandardOutput.ReadToEndAsync();
+        Task<string> stderr = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync().ConfigureAwait(false);
+
+        string output = ((await stdout.ConfigureAwait(false)) + await stderr.ConfigureAwait(false)).Trim();
+        return (process.ExitCode, output);
+    }
+
+    /// <summary>
+    /// The folder LogPusher reads its raw chat logs from, as recorded in <c>state.json</c> after
+    /// the first poll. Null before then, or if LogPusher has no folder configured — in which case
+    /// there is nothing useful to open.
+    /// </summary>
+    public string? SourceLogFolder => ReadState()?.LogFolder is { Length: > 0 } folder ? folder : null;
 
     /// <summary>The last <paramref name="count"/> decisions, newest last.</summary>
     public IReadOnlyList<Decision> ReadDecisions(int count)
@@ -226,6 +268,10 @@ public sealed class LogPusherInstall
                 LastPoll: root.TryGetProperty("last_poll", out JsonElement poll) &&
                           DateTimeOffset.TryParse(poll.GetString(), out DateTimeOffset parsed)
                     ? parsed
+                    : null,
+                LogFolder: root.TryGetProperty("log_folder", out JsonElement folder) &&
+                           folder.ValueKind == JsonValueKind.String
+                    ? folder.GetString()
                     : null);
         }
         catch (Exception ex) when (ex is IOException or JsonException)

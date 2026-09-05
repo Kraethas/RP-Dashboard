@@ -35,6 +35,18 @@ It never subscribes to the chat feed, it keeps its own repository and release cy
 on running headless when the dashboard is closed. Embedding CPython or rewriting 5,000 lines of
 Python would buy nothing.
 
+The panel's buttons: **Push logs** runs `LogPusher.exe --push-all` — a headless one-shot that
+summarizes and pushes every finished session not yet pushed. Summarizing is the only step that
+costs Claude tokens, so LogPusher defaults to `AUTO_SUMMARIZE=false`: the watcher tails and
+archives all day for free, and this button pays for the summaries once, when the player is done,
+rather than re-summarizing a session that was still being played. **Chat logs** opens the raw
+log folder LogPusher reads (its path comes from `log_folder` in `state.json`, so it is known
+only after LogPusher's first poll); **Diagnostics** opens LogPusher's own `logs\`; **Archive**
+opens the filtered sessions. The push result is reported through `logs\last_push.txt` rather
+than the exe's stdout, because `LogPusher.exe` is a `--windowed` PyInstaller build with no
+reliable console — the same reason the exe dispatches `--push-all` from its GUI entry point
+instead of shipping a second console executable.
+
 A tool is a DLL in the `Plugins` folder beside the exe. The host reflects over anything marked
 `[assembly: RpToolAssembly(HostApi.Version)]`, finds the `IRpTool` implementations, and gives
 each one a tab.
