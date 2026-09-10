@@ -30,6 +30,16 @@ internal sealed class ChatFeed : IChatFeed, IAsyncDisposable
     private static readonly TimeSpan MinRetry = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan MaxRetry = TimeSpan.FromSeconds(15);
 
+    /// <summary>
+    /// How long an outage can last and still have its gap recovered on reconnect. A hitch, a HUD
+    /// reload or a loading screen is seconds; a genuine "closed the game and came back later" is
+    /// tens of minutes. Ten minutes sits well clear of both, so a transient drop recovers the
+    /// lines that arrived during it while a real restart is treated as a fresh baseline. The
+    /// overlap test is the real correctness guard; this only bounds the one case it cannot see —
+    /// a stale window that happens to share a line with a session that started hours later.
+    /// </summary>
+    private static readonly TimeSpan ReconnectRecoveryWindow = TimeSpan.FromMinutes(10);
+
     private readonly NuiConnection _connection = new();
     private readonly Dispatcher _dispatcher;
     private readonly object _gate = new();
@@ -37,6 +47,12 @@ internal sealed class ChatFeed : IChatFeed, IAsyncDisposable
 
     /// <summary>The previous poll's messages, for working out which ones are new.</summary>
     private IReadOnlyList<string> _previousHtml = Array.Empty<string>();
+
+    /// <summary>
+    /// When the last successful read happened, UTC. Used on reconnect to tell a brief drop (whose
+    /// gap is worth recovering) from a long absence (whose stale window is not worth trusting).
+    /// </summary>
+    private DateTime _lastReadUtc = DateTime.MinValue;
 
     /// <summary>
     /// Recent lines, newest last, capped. Only exists so a subscription that starts between
@@ -167,11 +183,25 @@ internal sealed class ChatFeed : IChatFeed, IAsyncDisposable
 
                 if (!wasConnected)
                 {
-                    // A reconnect means the HUD list we are diffing against is stale — the
-                    // buffer may have rolled over completely while the game was away. Treat the
-                    // first read after reconnecting as the new baseline rather than announcing
-                    // all of it as new.
+                    // A reconnect. The window we were diffing against may still overlap what is on
+                    // the HUD now — a brief drop (a hitch, a HUD reload, a two-minute network
+                    // stall) leaves most of the buffer in place — in which case the lines that
+                    // arrived while we were away are still there to be recovered. Blindly
+                    // baselining here was the bug: it discarded exactly those lines, and the log
+                    // is the only copy of them there will ever be.
+                    //
+                    // RecoverOnReconnect returns them when the drop was short and the overlap
+                    // holds, and nothing (baselining) when the outage was long or the buffer
+                    // rolled clean over, which is the case the old comment rightly worried about.
+                    bool within = DateTime.UtcNow - _lastReadUtc <= ReconnectRecoveryWindow;
+                    IReadOnlyList<string> recovered =
+                        RecoverOnReconnect(_previousHtml, html, within, out bool gap);
+
+                    if (recovered.Count > 0) Publish(recovered);
+                    if (gap) RaiseGapSuspected();
+
                     _previousHtml = html;
+                    _lastReadUtc = DateTime.UtcNow;
                     SetStatus(new ChatFeedStatus(ChatFeedState.Reading, "reading chat"));
                     retry = MinRetry;
                     wait = CurrentInterval();
@@ -181,6 +211,7 @@ internal sealed class ChatFeed : IChatFeed, IAsyncDisposable
                     Publish(NewLinesSince(_previousHtml, html, out bool gap));
                     if (gap) RaiseGapSuspected();
                     _previousHtml = html;
+                    _lastReadUtc = DateTime.UtcNow;
                     retry = MinRetry;
                     wait = CurrentInterval();
                 }
@@ -262,6 +293,45 @@ internal sealed class ChatFeed : IChatFeed, IAsyncDisposable
         IReadOnlyList<string> previous,
         IReadOnlyList<string> current)
         => NewLinesSince(previous, current, out _);
+
+    /// <summary>
+    /// What to publish on reconnect: the lines that arrived while the connection was down and are
+    /// still on the HUD, or nothing when it isn't safe to say.
+    ///
+    /// Three cases, and the difference between them is the whole point of this method:
+    ///
+    /// * <b>Cold start</b> (<paramref name="previousHtml"/> empty) — there is no earlier window to
+    ///   diff against, so the current buffer is pre-existing backlog, not new chat. Baseline:
+    ///   return nothing. This is what keeps a tool switched on mid-session from firing on history.
+    /// * <b>Short drop, overlap holds</b> — the buffer still contains the last window we saw, so
+    ///   the tail past the overlap is exactly what we missed. Return it; no gap.
+    /// * <b>Long outage, or the buffer rolled clean over</b> (no overlap) — the window is stale or
+    ///   from a different session and cannot be trusted to line up. Baseline and flag the gap.
+    ///
+    /// <paramref name="withinRecoveryWindow"/> is the time guard: the overlap test cannot tell a
+    /// genuine continuation from a stale window that happens to share a line with a session hours
+    /// later, so a long outage baselines regardless of what the overlap says.
+    /// </summary>
+    internal static IReadOnlyList<string> RecoverOnReconnect(
+        IReadOnlyList<string> previousHtml,
+        IReadOnlyList<string> current,
+        bool withinRecoveryWindow,
+        out bool gapSuspected)
+    {
+        gapSuspected = false;
+
+        if (previousHtml.Count == 0 || !withinRecoveryWindow)
+            return Array.Empty<string>();
+
+        IReadOnlyList<string> recovered = NewLinesSince(previousHtml, current, out bool gap);
+        if (gap)
+        {
+            gapSuspected = true;
+            return Array.Empty<string>();
+        }
+
+        return recovered;
+    }
 
     /// <param name="gapSuspected">
     /// True when no overlap could be found at all between two non-empty reads. That means more

@@ -308,13 +308,29 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Where the chat log is written. Beside Afterline's own folder would invite confusion
-    /// while both are running, so it lives with the dashboard's other state.
+    /// Where the chat log is written. Now that Afterline is retired, the logs live under the
+    /// user's own "Chat Parser" folder rather than in %LOCALAPPDATA% — one obvious place to
+    /// manage them by hand, beside where Afterline used to keep its own.
+    ///
+    /// The path is fixed on purpose (this is a single-machine tool), but a machine without that
+    /// drive falls back to the per-user location rather than failing to log at all.
     /// </summary>
+    private const string PreferredChatLogDirectory = @"D:\Documents\GTA RP\Chat Parser\RP-Dashboard";
+
     private static string ChatLogDirectory()
-        => Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "RpDashboard", "ChatLogs");
+    {
+        try
+        {
+            Directory.CreateDirectory(PreferredChatLogDirectory);
+            return PreferredChatLogDirectory;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "RpDashboard", "ChatLogs");
+        }
+    }
 
     /// <summary>
     /// Reflects the Run key rather than a setting of ours, because the registry is the truth:

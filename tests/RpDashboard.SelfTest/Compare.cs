@@ -47,11 +47,15 @@ internal static class Compare
             names.Add($"Chatlog [GTAWorld Roleplay English] [{day}].txt");
         }
 
-        string logs = Path.Combine(
+        // The chat log moved out of %LOCALAPPDATA% when Afterline was retired; fall back to the
+        // old spot so a comparison of an older day still finds its file.
+        string logs = @"D:\Documents\GTA RP\Chat Parser\RP-Dashboard";
+        string legacy = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "RpDashboard", "ChatLogs");
 
         string ours = names.Select(n => Path.Combine(logs, n)).FirstOrDefault(File.Exists)
+                      ?? names.Select(n => Path.Combine(legacy, n)).FirstOrDefault(File.Exists)
                       ?? Path.Combine(logs, names[0]);
 
         string? theirs = names.Select(FindAfterline).FirstOrDefault(found => found is not null);

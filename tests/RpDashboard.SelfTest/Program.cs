@@ -40,6 +40,9 @@ public static class Program
         Section("new-line detection (the scrolling-window overlap rule)");
         NewLineTests();
 
+        Section("recovering the gap on reconnect");
+        ReconnectTests();
+
         Section("outerHTML to plain text");
         HtmlTests();
 
@@ -96,6 +99,42 @@ public static class Program
 
         Check("consecutive duplicates survive a scroll",
             New(["x", "a", "a"], ["a", "a", "a"]), ["a"]);
+    }
+
+    private static void ReconnectTests()
+    {
+        // A brief drop, and the buffer still holds the window we last saw. The two lines that
+        // arrived while we were away are recovered rather than lost — this is the real case from
+        // 5 September, where a two-minute stall cost two lines that baselining had thrown away.
+        var (lines, gap) = Recover(["a", "b"], ["a", "b", "c", "d"], within: true);
+        Check("a short drop recovers the missed tail", lines, ["c", "d"]);
+        Check("and does not flag a gap", !gap);
+
+        // Cold start: no earlier window to trust, so the buffer is pre-existing backlog. Nothing
+        // is published — this is the invariant that stops a tool switched on mid-session firing
+        // on everything already on screen.
+        (lines, gap) = Recover([], ["a", "b", "c"], within: true);
+        Check("a cold start baselines, publishing nothing", lines, []);
+        Check("a cold start is not a gap", !gap);
+
+        // The buffer rolled clean over during the outage: no overlap, so the window cannot be
+        // lined up. Baseline, and say so.
+        (lines, gap) = Recover(["a", "b"], ["x", "y", "z"], within: true);
+        Check("a rolled-over buffer recovers nothing", lines, []);
+        Check("and flags the gap", gap);
+
+        // A long outage — the game was closed and reopened later. Even if the stale window happens
+        // to share a line with the new session, the time guard refuses to trust it.
+        (lines, gap) = Recover(["a", "b"], ["a", "b", "c"], within: false);
+        Check("a long outage baselines regardless of overlap", lines, []);
+        Check("a long outage is a clean baseline, not a gap", !gap);
+    }
+
+    private static (IReadOnlyList<string> lines, bool gap) Recover(
+        string[] previous, string[] current, bool within)
+    {
+        IReadOnlyList<string> lines = ChatFeed.RecoverOnReconnect(previous, current, within, out bool gap);
+        return (lines, gap);
     }
 
     private static void HtmlTests()

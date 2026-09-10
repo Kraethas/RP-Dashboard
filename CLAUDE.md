@@ -81,8 +81,11 @@ All in `Chat/ChatFeed.cs`, and all worth preserving:
 ## The chat log (replacing Afterline)
 
 `Chat/ChatLogWriter.cs` writes the chat to disk as it arrives, deduplicated, into
-`%LOCALAPPDATA%\RpDashboard\ChatLogs`. On by default; the status bar carries the toggle and a
-line count, and clicking the count opens the folder.
+`D:\Documents\GTA RP\Chat Parser\RP-Dashboard` (see `MainWindow.ChatLogDirectory`; it falls
+back to `%LOCALAPPDATA%\RpDashboard\ChatLogs` on a machine without that drive). On by default;
+the status bar carries the toggle and a line count, and clicking the count opens the folder.
+The path was moved out of `%LOCALAPPDATA%` once Afterline was retired, so the logs sit in one
+folder the user manages by hand; LogPusher's `GTAW_LOG_FOLDER` points at the same place.
 
 It exists to make Afterline unnecessary. Afterline is a separate program scraping the same HUD
 through the same DevTools port, so it costs a second connection to the game and 69 MB — and it
@@ -192,47 +195,51 @@ split it across two. LogPusher takes a session's date from the filename and its 
 body, so those two disagreeing is exactly the class of quiet mismatch that has already cost this
 project twice.
 
-### Phase 1: run both, then compare
+### Afterline is retired (2026-09-10)
 
-Afterline is **not** to be switched off yet.
+It was switched off after nine days of comparison. The comparison itself is still here for when
+a capture is ever in doubt:
 
 ```
-dotnet run --project tests/RpDashboard.SelfTest -- --compare [29-August-2026]
+dotnet run --project tests/RpDashboard.SelfTest -- --compare [05-September-2026]
 ```
 
-That reports lines Afterline saw and we did not, which is the only number that decides whether
-switching is safe. Duplicates on their side are expected and are the point.
+It reports lines Afterline saw and we did not, counting only the spans the dashboard was
+actually writing — coverage while the dashboard is closed is not capture, and first-line-to-
+last-line is not a coverage window. The risk it measures runs the opposite way to Afterline's
+bug: **Afterline's duplication is noisy but safe, a tail-based reader is quiet but lossy.**
 
-The risk being measured is real and runs the opposite way to Afterline's bug. FiveM never writes
-chat to disk, so this log only exists while the dashboard is open: **Afterline's duplication is
-noisy but safe, a tail-based reader is quiet but lossy.** The measured headroom is comfortable —
-peak observed chat is 24 lines/sec against a 240/sec read — and `ChatFeed.GapSuspected` fires
-when a poll finds no overlap at all with the previous one, which is the case where lines went by
-unseen. The status bar says so rather than swallowing it.
+What nine days showed: **not one line missed while the dashboard was writing, on eight of nine
+days.** The exception was 5 September — two lines (both automated truck-job `[INFO]` notices at
+14:38:35, no roleplay) lost to a roughly two-minute connection drop inside a writing span. The
+reader reconnected and re-baselined, discarding the two lines that were still on the HUD. That
+was the one real capture loss across ~17,000 in-span lines, and it is the case
+`RecoverOnReconnect` now fixes (below).
 
-### What the comparison has shown so far
+Retiring it meant three things, all reversible: LogPusher's `GTAW_LOG_FOLDER` now points at the
+dashboard's log folder, Afterline's process was stopped, and its HKCU Run entry was removed. The
+consequence is that **the dashboard is now the only thing recording chat**, so it must run while
+the user plays — Start with Windows covers that.
 
-Three days, and **not one line missed while the dashboard was writing**:
+### Recovering the gap on reconnect
 
-| day | our coverage | Afterline lines in those spans | missed |
-|---|---|---|---|
-| 30 August | 9 min over 5 spans | 15 | 0 |
-| 31 August | 23 min over 8 spans | 599 | 0 |
-| 1 September | 20 min, one span | 152 | 0 |
+`ChatFeed.RecoverOnReconnect`. The reconnect branch of the poll loop used to baseline blindly —
+treat the first read after reconnecting as the new baseline and publish nothing — which is what
+lost those two lines on 5 September. It now diffs the first post-reconnect read against the
+window it last saw:
 
-1 September is the cleanest case: the dashboard was open for the whole session, and the two
-logs are equivalent — 152 lines, 149 distinct, the same 3 genuine repeats on both sides.
+- **Short drop, overlap holds** — the buffer still contains the last window we saw, so the tail
+  past the overlap is exactly what arrived while we were away. Publish it.
+- **Cold start** (no previous window) — the buffer is pre-existing backlog, not new chat.
+  Baseline, publish nothing. This is what still keeps a tool switched on mid-session from firing
+  on history.
+- **Long outage, or the buffer rolled clean over** — no overlap, or the outage was longer than
+  `ReconnectRecoveryWindow` (10 min). The window can't be trusted to line up (the game may have
+  restarted), so baseline and raise `GapSuspected`.
 
-31 August is the instructive one. Read naively it says 394 lines missed; every one of them
-arrived between 22:05 and 23:45 while the dashboard was closed. **Coverage, not capture.** That
-is why `--compare` reports the spans the dashboard was actually writing and only counts misses
-inside them — first-line-to-last-line is not a coverage window, and treating it as one turns a
-perfect day into an alarming one.
-
-So the reader is not the risk. The risk is entirely whether the dashboard is open, which no
-comparison can measure.
-
-Switch Afterline off once several days compare clean, not before.
+The overlap test is the correctness guard; the time window only bounds the one case it cannot
+see — a stale window that happens to share a line with a session that started hours later. The
+self-test covers all four cases.
 
 ## Invariants — do not break these
 
