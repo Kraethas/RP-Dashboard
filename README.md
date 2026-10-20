@@ -25,28 +25,73 @@ Pick **self-contained** if you just want it to run. Pick **framework-dependent**
 have the .NET 8 Desktop Runtime (or don't mind installing it once) and want a tiny download.
 
 The app lives in the system tray. First launch opens the window; closing it minimises to the
-tray, and right-clicking the tray icon exits. Chat logs are written under
-`%LOCALAPPDATA%\RpDashboard\ChatLogs` by default.
+tray, and right-clicking the tray icon exits. Chat logs are saved automatically — see
+[Chat logs](#chat-logs) for where they go and how to change it.
 
 **The LogPusher tab is the exception** — it's a control panel for a separate Python program
 (session-archiving to Notion) that needs its own API keys, so it won't do anything without that
 setup. The other three tabs — Unit Alert, RP Pace, Street Medic — work the moment you launch.
 
-## Tabs
+## What's in it
 
-| Tool | What it does | Lives in |
-|---|---|---|
-| Unit Alert | Plays a sound when a callsign appears in chat | `tools/UnitAlert` |
-| RP Pace | Time since your last RP action, plus an emote library | [rp-pace](https://github.com/Kraethas/rp-pace) |
-| Street Medic | Triage and first-aid protocol card | [StreetMedic](https://github.com/Kraethas/StreetMedic) |
-| LogPusher | Start/stop and watch the session archiver | `tools/LogPusher` |
+Four tools, one per tab:
 
-Each tool is a DLL in the `Plugins` folder beside the exe. **Rebuild a tool, drop the DLL in,
-restart — the dashboard is not rebuilt.** Most of them live in their own repositories and keep
-their own release cadence; the dashboard only needs rebuilding when the contract itself changes.
+- **Unit Alert** — watches chat for callsigns you choose and plays a sound the moment one
+  appears, so you don't miss a page while you're looking elsewhere.
+- **RP Pace** — shows how long it's been since your last roleplay action, a nudge to keep a
+  scene moving, with a browsable library of emotes to copy from.
+- **Street Medic** — a step-by-step triage and first-aid protocol card that follows the scene,
+  for playing a medic without memorising the whole procedure.
+- **LogPusher** — start, stop and watch the session archiver that saves your chat logs and
+  pushes session summaries to Notion.
 
-LogPusher is the odd one out: it is a Python program that reads chat *log files* off disk and
-never touches the game, so its tab is a control panel over the existing exe rather than a port.
+### How the dashboard consolidates them
+
+Unit Alert, RP Pace and Street Medic each used to be its own program, and each opened its own
+connection to the game and scraped the chat HUD on its own timer. Three programs doing the same
+read three times over. The dashboard **reads the game once** and hands every tab the same chat,
+and it only reads at all while a tab is actually listening — switch every tab off and it stops
+touching the game entirely. One window, one connection, one set of chat logs.
+
+Each tool is a plugin (a DLL in the `Plugins` folder beside the exe), so a tool can be updated on
+its own without rebuilding the dashboard. LogPusher is the odd one out: it is a separate Python
+program that reads chat *log files* off disk and never touches the game, so its tab is a control
+panel over that program rather than a tab that reads chat itself.
+
+## Chat logs
+
+The dashboard writes your chat to disk as it arrives, de-duplicated, on by default. The status
+bar carries an on/off toggle and a running line count; **click the count to open the folder**.
+
+**Where it saves.** By default, `%LOCALAPPDATA%\RpDashboard\ChatLogs`
+(e.g. `C:\Users\You\AppData\Local\RpDashboard\ChatLogs`).
+
+**To choose your own folder:**
+
+1. Exit the dashboard first (tray icon → Exit). The setting is read once at startup.
+2. Open (or create) `%LOCALAPPDATA%\RpDashboard\host.json` in a text editor.
+3. Add a `ChatLogFolder` value — JSON, so back-slashes are doubled:
+
+   ```json
+   {
+     "ChatLogEnabled": true,
+     "ChatLogFolder": "D:\\GTA RP\\Chat Logs"
+   }
+   ```
+
+4. Start the dashboard again. If the folder can't be created (a drive that isn't there), it
+   quietly falls back to the default rather than failing to log.
+
+**What gets stored.** One pair of files per in-game day, named like Afterline's so other tools
+can read them unchanged:
+
+- `Chatlog [GTAWorld Roleplay English] [20-October-2026].txt` — the chat itself, one
+  `[HH:MM:SS] message` per line, on the **game's** clock (so it lines up with other players'
+  logs), with duplicates already removed.
+- `Chatlog [GTAWorld Roleplay English] [20-October-2026].lines.jsonl` — a companion file, one
+  JSON record per line, carrying what the plain text can't: a sequence number, both the game and
+  local timestamps, the line's colour, and the original HUD markup. Nothing has to read it; it's
+  there so no detail is lost.
 
 ## Read-only, always
 
