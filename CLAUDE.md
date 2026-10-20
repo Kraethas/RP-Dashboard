@@ -80,12 +80,18 @@ All in `Chat/ChatFeed.cs`, and all worth preserving:
 
 ## The chat log (replacing Afterline)
 
-`Chat/ChatLogWriter.cs` writes the chat to disk as it arrives, deduplicated, into
-`D:\Documents\GTA RP\Chat Parser\RP-Dashboard` (see `MainWindow.ChatLogDirectory`; it falls
-back to `%LOCALAPPDATA%\RpDashboard\ChatLogs` on a machine without that drive). On by default;
-the status bar carries the toggle and a line count, and clicking the count opens the folder.
-The path was moved out of `%LOCALAPPDATA%` once Afterline was retired, so the logs sit in one
-folder the user manages by hand; LogPusher's `GTAW_LOG_FOLDER` points at the same place.
+`Chat/ChatLogWriter.cs` writes the chat to disk as it arrives, deduplicated. The default folder
+is `%LOCALAPPDATA%\RpDashboard\ChatLogs` — portable, so a shared build with no settings lands
+somewhere sensible on any machine. `HostSettings.ChatLogFolder` in `host.json` overrides it, and
+a configured path that can't be created (a drive that isn't there) falls back to the default
+rather than failing to log; see `MainWindow.ChatLogDirectory`. On by default; the status bar
+carries the toggle and a line count, and clicking the count opens the folder.
+
+This author's own install carries an override pointing at `D:\Documents\GTA RP\Chat Parser\RP-Dashboard`,
+the folder managed by hand, and LogPusher's `GTAW_LOG_FOLDER` points at the same place. That
+override lives only in this machine's `host.json`, **not** in the code, precisely so the build
+handed to anyone else does not try to write to a stranger's D: drive — the lesson from the
+earlier version, which hardcoded the path.
 
 It exists to make Afterline unnecessary. Afterline is a separate program scraping the same HUD
 through the same DevTools port, so it costs a second connection to the game and 69 MB — and it

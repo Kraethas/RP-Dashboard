@@ -27,6 +27,15 @@ public sealed class HostSettings
     /// running, and this only writes what the feed was already reporting.
     /// </summary>
     public bool ChatLogEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Where the chat log is written. Empty means the default, which is the only sensible value
+    /// on a machine that isn't this developer's: a hardcoded absolute path travels badly, so a
+    /// shared build with no host.json lands in <c>%LOCALAPPDATA%\RpDashboard\ChatLogs</c>. This
+    /// author's own install carries an override here pointing at the "Chat Parser" folder they
+    /// manage by hand; nothing in the UI sets it yet — it is edited in host.json.
+    /// </summary>
+    public string ChatLogFolder { get; set; } = string.Empty;
 }
 
 public partial class MainWindow : Window
@@ -37,6 +46,7 @@ public partial class MainWindow : Window
     private readonly HotkeyService _hotkeys = new();
     private readonly ChatLogWriter _chatLog;
     private readonly SettingsScope _hostSettings = new("RpDashboard", "host.json");
+    private readonly HostSettings _hostConfig;
     private readonly List<ToolHost> _hosts = new();
     private readonly Dictionary<ToolHost, TabItem> _tabs = new();
 
@@ -52,7 +62,10 @@ public partial class MainWindow : Window
         _audio = new AudioService(Dispatcher);
         _clipboard = new ClipboardService(Dispatcher);
 
-        _chatLog = new ChatLogWriter(_chat, Dispatcher, ChatLogDirectory());
+        // Loaded before the writer is built, because it carries where the writer should write.
+        _hostConfig = _hostSettings.Load(new HostSettings());
+
+        _chatLog = new ChatLogWriter(_chat, Dispatcher, ChatLogDirectory(_hostConfig.ChatLogFolder));
         _chatLog.Progress += (_, _) => ShowChatLogStatus();
         _chatLog.Failed += (_, message) => ToolStatusText.Text = "Chat log: " + message;
 
@@ -85,9 +98,8 @@ public partial class MainWindow : Window
 
         SetUpStartupToggle();
 
-        HostSettings settings = _hostSettings.Load(new HostSettings());
-        ChatLogBox.IsChecked = settings.ChatLogEnabled;
-        if (settings.ChatLogEnabled) _chatLog.Start();
+        ChatLogBox.IsChecked = _hostConfig.ChatLogEnabled;
+        if (_hostConfig.ChatLogEnabled) _chatLog.Start();
         ShowChatLogStatus();
     }
 
@@ -308,27 +320,31 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Where the chat log is written. Now that Afterline is retired, the logs live under the
-    /// user's own "Chat Parser" folder rather than in %LOCALAPPDATA% — one obvious place to
-    /// manage them by hand, beside where Afterline used to keep its own.
+    /// Where the chat log is written. The default is <c>%LOCALAPPDATA%\RpDashboard\ChatLogs</c> —
+    /// portable, so a shared build with no settings lands somewhere sensible on any machine.
+    /// <paramref name="configured"/> (from <see cref="HostSettings.ChatLogFolder"/>) overrides it;
+    /// this author's install points it at the "Chat Parser" folder they manage by hand.
     ///
-    /// The path is fixed on purpose (this is a single-machine tool), but a machine without that
-    /// drive falls back to the per-user location rather than failing to log at all.
+    /// A configured path that can't be created — a drive that isn't on this machine — falls back
+    /// to the default rather than failing to log at all. That is what makes an install carrying a
+    /// personal override still start on someone else's computer.
     /// </summary>
-    private const string PreferredChatLogDirectory = @"D:\Documents\GTA RP\Chat Parser\RP-Dashboard";
-
-    private static string ChatLogDirectory()
+    private static string ChatLogDirectory(string? configured)
     {
+        string fallback = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "RpDashboard", "ChatLogs");
+
+        if (string.IsNullOrWhiteSpace(configured)) return fallback;
+
         try
         {
-            Directory.CreateDirectory(PreferredChatLogDirectory);
-            return PreferredChatLogDirectory;
+            Directory.CreateDirectory(configured);
+            return configured;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
-            return Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "RpDashboard", "ChatLogs");
+            return fallback;
         }
     }
 
@@ -382,7 +398,9 @@ public partial class MainWindow : Window
         if (enabled) _chatLog.Start();
         else _chatLog.Stop();
 
-        _hostSettings.Save(new HostSettings { ChatLogEnabled = enabled });
+        // Save through the loaded config so a custom ChatLogFolder isn't wiped by toggling the log.
+        _hostConfig.ChatLogEnabled = enabled;
+        _hostSettings.Save(_hostConfig);
         ShowChatLogStatus();
     }
 
@@ -393,7 +411,7 @@ public partial class MainWindow : Window
 
     private void OnChatLogClicked(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
-        string directory = ChatLogDirectory();
+        string directory = ChatLogDirectory(_hostConfig.ChatLogFolder);
 
         if (!Directory.Exists(directory))
         {

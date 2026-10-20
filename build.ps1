@@ -47,7 +47,7 @@ $root = $PSScriptRoot
 $configuration = 'Release'
 $framework = 'net8.0-windows'
 $runtime = 'win-x64'
-$version = '1.0.0'
+$version = '1.1.0'
 
 $outputRoot = Join-Path $root 'dist'
 
