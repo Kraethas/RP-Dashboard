@@ -75,7 +75,16 @@ internal sealed class ChatLogWriter : IDisposable
 
     private readonly IChatFeed _feed;
     private readonly Dispatcher _dispatcher;
-    private readonly string _directory;
+
+    /// <summary>
+    /// Resolved on every flush, not once at construction. The destination can be a folder on a
+    /// drive that isn't mounted yet when the app launches at login — resolving once cached the
+    /// fallback for the whole session and silently stranded a week of logs somewhere LogPusher
+    /// wasn't looking. Re-resolving each flush costs nothing (there is no chat to write until the
+    /// game is up, by which time any such drive is long mounted) and picks up the real folder as
+    /// soon as it appears.
+    /// </summary>
+    private readonly Func<string> _resolveDirectory;
     private readonly object _gate = new();
     private readonly Queue<ChatLine> _pending = new();
 
@@ -91,11 +100,11 @@ internal sealed class ChatLogWriter : IDisposable
     private DateTime _currentDay = DateTime.MinValue;
     private bool _disposed;
 
-    public ChatLogWriter(IChatFeed feed, Dispatcher dispatcher, string directory)
+    public ChatLogWriter(IChatFeed feed, Dispatcher dispatcher, Func<string> resolveDirectory)
     {
         _feed = feed;
         _dispatcher = dispatcher;
-        _directory = directory;
+        _resolveDirectory = resolveDirectory;
     }
 
     /// <summary>Lines written to disk since the dashboard started.</summary>
@@ -212,7 +221,9 @@ internal sealed class ChatLogWriter : IDisposable
 
     private void Write(IReadOnlyList<ChatLine> batch)
     {
-        Directory.CreateDirectory(_directory);
+        // Resolved here, per flush, not cached from construction — see _resolveDirectory.
+        string directory = _resolveDirectory();
+        Directory.CreateDirectory(directory);
 
         // Grouped by the game's day, not this machine's, so a batch that straddles the game's
         // midnight lands in two files exactly as Afterline would have written it.
@@ -220,13 +231,13 @@ internal sealed class ChatLogWriter : IDisposable
                      .Select(line => (Line: line, GameTime: _gameClock.TimeOf(line.Text, line.SeenAt)))
                      .GroupBy(entry => entry.GameTime.Date))
         {
-            WriteDay(day.Key, day.ToArray());
+            WriteDay(directory, day.Key, day.ToArray());
         }
     }
 
-    private void WriteDay(DateTime gameDay, IReadOnlyList<(ChatLine Line, DateTime GameTime)> entries)
+    private void WriteDay(string directory, DateTime gameDay, IReadOnlyList<(ChatLine Line, DateTime GameTime)> entries)
     {
-        string path = Path.Combine(_directory, FileName(gameDay));
+        string path = Path.Combine(directory, FileName(gameDay));
         bool isNewFile = !File.Exists(path);
 
         var text = new StringBuilder();

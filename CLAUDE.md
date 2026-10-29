@@ -93,6 +93,17 @@ override lives only in this machine's `host.json`, **not** in the code, precisel
 handed to anyone else does not try to write to a stranger's D: drive — the lesson from the
 earlier version, which hardcoded the path.
 
+**The folder is resolved on every flush, not once at construction** — `ChatLogWriter` takes a
+`Func<string>`, not a path. This fixed a real loss: the dashboard starts at login via the Run
+key, and an override on a secondary drive (`D:`) that had not finished mounting yet failed to
+create, so the writer cached the `%LOCALAPPDATA%` fallback for the **whole session**. Resolving
+once meant it never recovered even after the drive appeared, and because LogPusher reads the
+configured folder, a week of sessions landed somewhere it never looked. Re-resolving each flush
+costs nothing — there is no chat to write until the game is up, by which time any such drive is
+long mounted — and a startup check now says so in the status bar when the configured folder
+isn't reachable yet. If this ever recurs, the two folders to compare are the configured one and
+`%LOCALAPPDATA%\RpDashboard\ChatLogs`.
+
 It exists to make Afterline unnecessary. Afterline is a separate program scraping the same HUD
 through the same DevTools port, so it costs a second connection to the game and 69 MB — and it
 re-reads the buffer hard enough that **73% of what it writes is duplicates** (22,738 of 31,148

@@ -65,7 +65,10 @@ public partial class MainWindow : Window
         // Loaded before the writer is built, because it carries where the writer should write.
         _hostConfig = _hostSettings.Load(new HostSettings());
 
-        _chatLog = new ChatLogWriter(_chat, Dispatcher, ChatLogDirectory(_hostConfig.ChatLogFolder));
+        // Passed as a resolver, not a fixed path: the writer re-checks every flush, so a log
+        // folder on a drive that mounts late (the dashboard starts at login) is used as soon as
+        // it appears, instead of being decided once at startup and cached for the whole session.
+        _chatLog = new ChatLogWriter(_chat, Dispatcher, () => ChatLogDirectory(_hostConfig.ChatLogFolder));
         _chatLog.Progress += (_, _) => ShowChatLogStatus();
         _chatLog.Failed += (_, message) => ToolStatusText.Text = "Chat log: " + message;
 
@@ -101,6 +104,17 @@ public partial class MainWindow : Window
         ChatLogBox.IsChecked = _hostConfig.ChatLogEnabled;
         if (_hostConfig.ChatLogEnabled) _chatLog.Start();
         ShowChatLogStatus();
+
+        // A configured folder that can't be reached right now (a drive not yet mounted) is worth
+        // saying out loud: the writer will keep retrying and switch to it the moment it appears,
+        // but until then the log is going to the fallback, which is not where LogPusher reads.
+        if (!string.IsNullOrWhiteSpace(_hostConfig.ChatLogFolder)
+            && !string.Equals(ChatLogDirectory(_hostConfig.ChatLogFolder), _hostConfig.ChatLogFolder,
+                              StringComparison.OrdinalIgnoreCase))
+        {
+            ToolStatusText.Text =
+                $"Chat-log folder {_hostConfig.ChatLogFolder} isn't available yet — logging to the default until it is.";
+        }
     }
 
     private void LoadTools()

@@ -191,7 +191,7 @@ public static class Program
     private static int WriteSample(string directory)
     {
         var feed = new FakeFeed();
-        using var writer = new ChatLogWriter(feed, Dispatcher.CurrentDispatcher, directory);
+        using var writer = new ChatLogWriter(feed, Dispatcher.CurrentDispatcher, () => directory);
         writer.Start();
 
         var start = new DateTime(2026, 8, 29, 9, 30, 0);
@@ -230,7 +230,7 @@ public static class Program
         try
         {
             var feed = new FakeFeed();
-            using (var writer = new ChatLogWriter(feed, Dispatcher.CurrentDispatcher, directory))
+            using (var writer = new ChatLogWriter(feed, Dispatcher.CurrentDispatcher, () => directory))
             {
                 writer.Start();
 
@@ -376,7 +376,7 @@ public static class Program
         try
         {
             var feed = new FakeFeed();
-            using (var writer = new ChatLogWriter(feed, Dispatcher.CurrentDispatcher, directory))
+            using (var writer = new ChatLogWriter(feed, Dispatcher.CurrentDispatcher, () => directory))
             {
                 writer.Start();
 
